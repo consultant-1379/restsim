@@ -1,0 +1,3 @@
+sim_name: NR21-Q4-V1x40-gNodeBRadio-NRAT-NR01  node_name: NR120gNodeBRadio00005        node_type: GNODEBRADIO  sim_mim_ver: 21-Q4-V1   stats_dir: /c/pm_data/  trace: /c/pm_data/      mim: Netsim_MSRBS-V2_NODE_MODEL_21-Q4-V1.xml     mib: MSRBS_V2_21-Q4_V1Mib.xml
+sim_name: 5G-Yang-FT-PCC-1-9-V3x2-5G132 node_name: 5G132PCC001  node_type: PCC  sim_mim_ver: 1-9-V3     stats_dir: /eric-pmbr-rop-file-store/   trace: /c/pm_data/  mim: Netsim_PCC_NODE_MODEL_1-9-V3.xml     mib: SGSN_16A_CP02_V3_mib.xml
+sim_name: 5G-Yang-FT-PCG-1-7-V1x2-5G118 node_name: 5G118PCG001  node_type: PCG  sim_mim_ver: 1-7-V1     stats_dir: /eric-pmbr-rop-file-store/   trace: /c/pm_data/  mim: Netsim_PCG_NODE_MODEL_1-7-V1.xml     mib: R6675_22-Q2_V1Mib.xml

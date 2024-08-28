@@ -1,0 +1,398 @@
+#!/usr/bin/env perl
+
+# $Id: makeRbsStat 79 2011-04-21 15:35:50Z eeicmuy $
+
+use strict;
+
+use Getopt::Long;
+use Compress::Zlib ;
+use Data::Dumper ;
+use File::Basename;
+use Time::Local;
+use File::Copy;
+
+our $DEBUG = 0;
+
+our $GNODEBRADIO = 1;
+
+our %neTypeFilter = (
+    $GNODEBRADIO => '\dgNodeBRadio'
+    );
+
+our @eutran_cell_list;
+
+our $new_template_conf = "False";
+
+our $server_host_name = `hostname`;
+
+our $global_epoch_dir = "";
+
+chomp($server_host_name);
+
+sub readCellList($$) {
+    my ($simulation,$neType) = @_;
+
+    if ( "$neType" eq "gNodeBRadio" ) {
+     $simulation = (split '\-', $simulation)[-1];
+    }
+
+    my %cellConfig = (
+        'cellMap' => {},
+        'fdnMap' => {},
+        );
+
+    my %cellMap = ();
+    my %fdnMap = ();
+    my $nePattern = "";
+    my $rdnIndex = 4;
+
+    if ( "$neType" eq "gNodeBRadio" ) {
+          $nePattern = '^ManagedElement='.$simulation . $neType .'(\d{5,5})';
+          $rdnIndex = 3;
+
+    }
+
+    if ( $DEBUG > 8 ) { print "readCellList: nePattern=$nePattern\n"; }
+    for my $line (@eutran_cell_list) {
+        if ( $DEBUG > 9 ) { print "readCellList: line = $line"; }
+        chop $line;
+        # Following Cell examples
+        #"SubNetwork=ONRM_RootMo_R,SubNetwork=GNODEBRADIO,MeContext=Nodename
+        my @rdnList = split( /,/, $line);
+        my $rdnLength = @rdnList;
+        # Get mecontext index from rdnList
+        my $meContextIndex =  $rdnLength - $rdnIndex ;
+        # Get cellName index from rndList
+        my $cellNameIndex = $rdnLength - 1;
+        if ( $DEBUG > 8 ) { print Dumper("readCellList: rdnList", \@rdnList ); }
+        if ( $rdnList[$meContextIndex] =~ /$nePattern/ ) {
+            my $erbsNum = $1;
+            if ( ! exists ($cellConfig{'fdnMap'}->{$erbsNum} )) {
+               my ($fdn) = $line =~ /(.*),ManagedElement=.*/;
+               $cellConfig{'fdnMap'}->{$erbsNum}=$fdn;
+            }
+            my ($cellName) = $rdnList[$cellNameIndex] =~ /^NRCellCU=(.*)/;
+            my ($cellNameDU) = $rdnList[$cellNameIndex] =~ /^NRCellDU=(.*)/;
+            if ( $cellNameDU ne "" ){
+                # Continue in case of NRCellDU to maintain correct cell map
+                # Always expecting both NRCellCU and NRCellDU count to be same
+                next;
+            }
+            if ( $DEBUG > 7 ) { print "readCellList: matched erbsNum=$erbsNum cellName=$cellName\n"; }
+            if ( ! exists ($cellConfig{'cellMap'}->{$erbsNum}) ) {
+                $cellConfig{'cellMap'}->{$erbsNum} = [];
+            }
+            push @{$cellConfig{'cellMap'}->{$erbsNum}}, $cellName;
+        }
+    }
+    if ( $DEBUG > 3 ) { print Dumper("readCellList: cellMap", \%cellMap); }
+    #print Dumper("readCellList: cellConfig", \%cellConfig);
+    return \%cellConfig;
+}
+
+sub getCellName
+{
+    my ($neId,$cellIndex,$r_CellNameMap) = @_;
+    my $result = $r_CellNameMap->{$neId}->[$cellIndex-1];
+    #if the cellname has null value then return the default cellid value
+    if(length($result) == 0){
+       $result=$cellIndex
+    }
+    if ( $DEBUG > 6 ) { print "getCellName: neId=$neId cellIndex=$cellIndex result=$result\n"; }
+    return $result;
+}
+
+sub readTemplate($$) {
+    my ($inFile,$neType) = @_;
+    #print "INFILE :: $inFile \n";
+    #
+    # Read input template
+    #
+    if ( $inFile eq "-" ) {
+        open INFILE, "<&STDIN";
+    } else {
+        open INFILE, $inFile or die "Could not open inFile $inFile";
+    }
+    my @inLines = <INFILE>;
+    close INFILE;
+
+    my %config = (
+        'nednLineNums' => {},
+        'cellLineNums' => [],
+        'cellIdMap' => {},
+        'cellTypeMap' => {},
+        'managedElementLines' => {}
+        );
+
+    for ( my $i = 0; $i <= $#inLines; $i++ ) {
+        if ( $DEBUG > 5 ) { print "readTemplate: processing line $inLines[$i]"; }
+
+        if ( $neType == $GNODEBRADIO ) {
+            if ( ( ! exists $config{'dnPrefixLineNum'} ) && ($inLines[$i] =~ /dnPrefix=/) ) {
+                $config{'dnPrefixLineNum'} = $i;
+            } elsif ( ($inLines[$i] =~ /NRCell(.)U=(\d+)(.*)/) ) {
+
+                my ($type,$cellId,$remainder) = ($1,$2,$3);
+                # print "readTemplate: match cell type=$type cellId=$cellId remainder=$remainder\n";
+                if ( $DEBUG > 5 ) { print "readTemplate: match cell cellId=$cellId remainder=$remainder\n"; }
+
+                push @{$config{'cellLineNums'}}, $i;
+                $config{'cellIdMap'}->{$i} = $cellId;
+                $config{'cellTypeMap'}->{$i} = $type;
+                $inLines[$i] = $remainder;
+            } elsif ( $inLines[$i] =~ /ManagedElement=1/ ) {
+                $config{'managedElementLines'}->{$i} = 1;
+            }
+
+        } 
+    }
+    if ( (! exists $config{'snLineNum'}) &&
+         ($neType != $GNODEBRADIO) ) {
+        die "Cannot find sn line, neType=$neType";
+    }
+    if ( $DEBUG > 5 ) { print Dumper("readTemplate: config", \%config); }
+    # print Dumper("readTemplate: config", \%config);
+    $config{'inLines'} = \@inLines;
+    #exit 1;
+    return \%config;
+}
+
+sub writeFile($$$$$$) {
+    my ($destFile,$thisFdn,$r_templateCfg,$neType,$rbsNum,$r_CellNameMap) = @_;
+    my $site_location;
+    #
+    # Generally we have CPU/Memory to spare and we want to minimize Disk I/O
+    # So build the file contents in memory and then use a single call to write
+    # the compressed data
+    #
+    my @outlines = ();
+
+    my $thisSnLine = sprintf "<sn>%s<\/sn>\n", $thisFdn;
+    my $nednLine = sprintf "<nedn>%s<\/nedn>\n", $thisFdn;
+
+    my ($mgtElementId) = $thisFdn =~ /=([^,=]+)$/;
+    my $mgtElementRdn = "ManagedElement=$mgtElementId";
+
+    my $cellLineIndex = 0;
+    my $node_name = (split /=/, $thisFdn)[-1];
+    my $maxCellLineIndex = $#{$r_templateCfg->{'cellLineNums'}};
+
+    for ( my $lineNum = 0; $lineNum <= $#{$r_templateCfg->{'inLines'}} ; $lineNum++ ) {
+        if ( $DEBUG > 9 ) { print "lineNum: $lineNum $r_templateCfg->{'inLines'}->[$lineNum]"; }
+        if ( $neType == $GNODEBRADIO ) {
+            if ( $lineNum == $r_templateCfg->{'dnPrefixLineNum'} ) {
+                my $line = $r_templateCfg->{'inLines'}->[$lineNum];
+                $line =~ s/dnPrefix=\"[^\"]+\"/dnPrefix="$thisFdn"/;
+                push @outlines, $line;
+            } elsif ( exists $r_templateCfg->{'managedElementLines'}->{$lineNum} ) {
+                my $line = $r_templateCfg->{'inLines'}->[$lineNum];
+                $line =~ s/ManagedElement=1/$mgtElementRdn/;
+                push @outlines, $line;
+            } elsif ( ($cellLineIndex <= $maxCellLineIndex) &&
+$lineNum == $r_templateCfg->{'cellLineNums'}->[$cellLineIndex] ) {
+                my $cellLine = "<measValue measObjLdn=\"ManagedElement=$mgtElementId,ENodeBFunction=1,NRCell" .
+                $r_templateCfg->{'cellTypeMap'}->{$lineNum} .
+                "U=" .
+                getCellName($rbsNum,$r_templateCfg->{'cellIdMap'}->{$lineNum}, $r_CellNameMap) .
+                $r_templateCfg->{'inLines'}->[$lineNum] . "\n";
+                if ( $DEBUG > 5 ) { print "writeFile: cellLine=$cellLine"; }
+                push @outlines, $cellLine;
+                $cellLineIndex++;
+            } else {
+                push @outlines, $r_templateCfg->{'inLines'}->[$lineNum];
+            }
+        }# CPP ERBS or RBS
+     }
+
+      # Now convert outlines into a single string
+      # Write the data to disk
+      my $outdata = join('', @outlines);
+      # if file extension is gz then compress the file else generate an uncompressed file
+          if ( $destFile=~m/.xml.gz/ ) {
+              my $gzStream = gzopen($destFile, "wb");
+              ( defined $gzStream ) or die "Failed to open $destFile";
+              $gzStream->gzwrite($outdata);
+              $gzStream->gzclose();
+
+          } else {
+              open UNCOMPRESSED, ">$destFile";
+              print UNCOMPRESSED $outdata;
+              close UNCOMPRESSED;
+          }
+          
+          my $full_path = File::Spec->catdir(dirname($destFile), $global_epoch_dir);
+          mkdir $full_path;
+          move($destFile, $full_path);
+}
+
+sub main
+{
+    my ($path,$fdn,$rnc,$inFile,$neTypeStr,$cellListFile,$simDir,$sym_link_dir,$sym_link_prefix,$epoch_dir);
+    # RNC_NAME and RBS_NUM are replaced in path and fdn with
+    # the rnc name and rbs number
+    my $oss_enabled = "False";
+    my $result = GetOptions(
+        "rnc=s" =>\$rnc,
+        "inFile=s" =>\$inFile,
+        "path=s" =>\$path,
+        "fdn=s" => \$fdn,
+        "netype=s" => \$neTypeStr,
+        "celllist=s" => \$cellListFile,
+        "simdir=s" => \$simDir,
+        "oss=s" => \$oss_enabled,
+        "linkdir=s" => \$sym_link_dir,
+        "symlink=s" => \$sym_link_prefix,
+        "epoch_dir=s" => \$epoch_dir,
+        "debug=n" => \$DEBUG
+        );
+    ( $result == 1 ) or die("Invalid Args");
+    my $output_path_oss = "/ossrc/data/pms/segment1/";
+    my $r_CellNameMap = undef;
+    my $neType = $GNODEBRADIO;
+    my $map = undef;
+    my $fdnMap = undef;
+    my %templateCfgMap = ();
+    $global_epoch_dir = $epoch_dir;
+
+    my $sim_id = (split '\-', $rnc)[-1];
+    $sim_id = "${sim_id}gNodeBRadio"; 
+    if ( $neTypeStr eq 'GNODEBRADIO' ) {
+        my $line;
+        $line =~ s/\r|\n//g;
+        open eutran_cell_data, $cellListFile or die "Cannot open $cellListFile";
+            while ( $line = <eutran_cell_data> ) {
+                push @eutran_cell_list, $line;
+            }
+        close eutran_cell_data;
+    }
+
+    if ( defined $neTypeStr ) {
+        if ( $neTypeStr eq 'GNODEBRADIO' ) {
+            $neType = $GNODEBRADIO;
+            $map = readCellList($rnc,"gNodeBRadio");
+            $r_CellNameMap = $map->{'cellMap'};
+            $fdnMap = $map->{'fdnMap'};
+        } else {
+            die "Unknown netype $neTypeStr";
+        }
+    }
+
+    my $r_templateCfg = undef;
+
+    if ( $inFile ne "-" ) {
+        my @templateFiles = split (';',$inFile) ;
+        if ( index($inFile, ":") != -1 ) {
+            $new_template_conf = "True";
+        }
+        foreach my $template (@templateFiles) {
+                if ( $template ne '' ) {
+                        if ( $DEBUG > 0 ) { print "Processing template $template\n"; }
+                        my ($cells) = $template =~ /.*_(.*)CELLS.*/;
+                        $r_templateCfg = readTemplate($template,$neType);
+                        $templateCfgMap{$cells} = $r_templateCfg;
+                }
+        }
+    } else {
+        $r_templateCfg = readTemplate($inFile,$neType);
+        $templateCfgMap{'DEFAULT'} = $r_templateCfg;
+    }
+
+    opendir DIR, $simDir or die "Cannot list $simDir";
+    my @neDirs = readdir DIR;
+    close DIR;
+    # print Dumper(" templateCfgMap : ", \%templateCfgMap);
+    #exit 1;
+    #
+    # Write output files
+    #
+    my $filter = $neTypeFilter{$neType};
+    foreach my $neDir ( @neDirs ) {
+        if ( $neDir !~  /$filter/ ) {
+            if ( $DEBUG > 0 ) { print "Skipping dir $neDir\n"; }
+            next;
+        }
+        if ( $neDir !~ /$sim_id/ ) {
+            if ($ DEBUG > 0 ) { print "Skipping for DMI $neDir\n"; }
+            next;
+        }
+        my @ne = split(/=/, $neDir);
+        my @f = `grep $ne[$#ne] "/tmp/showstartednodes.txt" | grep "STATS"`;
+        my $neLength = @f;
+        if ( $neLength < 1 ) {
+            next;
+        }
+        #print "Going inside for $neDir\n";
+        my ($rbsIndex) = $neDir =~ /(\d+)$/;
+        $rbsIndex =~ s/^0+//;
+
+        my $rbsNum;
+        if ( $neType == $GNODEBRADIO) {
+            $rbsNum = sprintf "%05d", $rbsIndex;
+        }
+
+        my $destFile = $path;
+        $destFile =~ s/RNC_NAME/$rnc/g;
+
+        if (index($rnc, "RBS") != -1) {
+            my $rncrbsnum = $rnc."RBSRBS_NUM";
+            $destFile =~ s/$rncrbsnum/$neDir/g;
+        }
+        else {
+            $destFile =~ s/RBS_NUM/$rbsNum/g;
+        }
+
+        my $destDir = dirname($destFile);
+        $destDir =~ s/RBS_NUM/$rbsNum/g;
+        if ( $DEBUG > 5 ) { print "rbsIndex=$rbsIndex Checking directory $destDir\n"; }
+	#if ( ! -d $destDir ) {
+             #system("rsh " . $server_host_name . " -l root '/netsim_users/pms/bin/createTempFsMountForNodes.sh' ");
+	     #             system("echo shroot | su root -c \"/netsim_users/pms/bin/createTempFsMountForNodes.sh\"")
+	     #}
+        if ( ! -d $destDir ) {
+            mkdir $destDir or die "cannot make dir";
+        }
+        if ( ! -d $destDir ) {
+            if ( $DEBUG > 5 ) { print "Directory $destDir not found, skipping\n"; }
+            next;
+        }
+
+        my $thisFdn = $fdnMap->{$rbsNum} ;
+        my $cells =  $r_CellNameMap->{$rbsNum} ;
+        if ( defined $cells && $inFile ne "-" ) {
+            my $size = @$cells;
+            my $cell_formation_str;
+            $cell_formation_str = $size;
+            $r_templateCfg = $templateCfgMap{$cell_formation_str};
+            if ( $DEBUG > 5 )  { print "Cell count $cell_formation_str for Node Number $rbsNum for SIM $rnc \n" ; }
+            if ( $size > 0) {
+
+            if (! defined $r_templateCfg) {
+                print "ERROR : No template with CELL count $cell_formation_str for SIM $rnc Node Number : $rbsNum \n";
+                exit 1;
+            }
+        }
+
+        }
+        else {
+        $r_templateCfg = $templateCfgMap{'DEFAULT'};
+        if (! defined $r_templateCfg) {
+            print "ERROR : No defualt template for SIM $rnc\n";
+            exit 1;
+            }
+        }
+
+        if(! defined $thisFdn){
+             $thisFdn = $fdn;
+             $thisFdn =~ s/RNC_NAME/$rnc/g;
+             $thisFdn =~ s/RBS_NUM/$rbsNum/g;
+        }
+        if ( $DEBUG > 5 ) { print "rbsIndex=$rbsIndex destFile=$destFile thisFdn=$thisFdn\n"; }
+        
+        writeFile($destFile,$thisFdn,$r_templateCfg,$neType,$rbsNum,$r_CellNameMap);
+        #print "Completed $count file.\n";
+        #$count++; 
+    }
+}
+
+main();
+

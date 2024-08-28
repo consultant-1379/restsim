@@ -1,0 +1,1369 @@
+#!/bin/bash
+
+################################################################################
+# COPYRIGHT Ericsson 2021
+#
+# The copyright to the computer program(s) herein is the property of
+# Ericsson Inc. The programs may be used and/or copied only with written
+# permission from Ericsson Inc. or in accordance with the terms and
+# conditions stipulated in the agreement/contract under which the
+# program(s) have been supplied.
+################################################################################
+
+###################################################
+# Version no    :  NSS 22.15
+# Purpose       :  Script to apply bandwidth limits to all the nodes based on the configuration in netsim_cfg
+# Jira No       :  NSS-36290
+# Gerrit Link   :  https://gerrit.ericsson.se/#/c/11565435/
+# Description   :  Adding support for HSS-FE in MD_1
+# Date          :  19/01/2022
+# Last Modified :  vadim.malakhovski@ericsson.com
+####################################################
+
+#Please setup the version value for every change in git
+VER="22.05"
+
+printUsage() {
+
+    cat <<EOF
+Usage: limitbw -n|-m <oss.cfg file>      -s|-c|-r [-l "netsim server list"]
+
+where
+ -n
+    Current netsim server will be selected to perform the mentioned action.
+
+ -m <oss.cfg file>
+    The cfg file to use. This is used to determine the list of
+   netsim servers to perform the mentioned action.
+
+
+Actions
+ -c
+   Config bandwidth limits.
+
+ -s
+   Show bandwidth limits.
+
+ -r
+   Remove all limits.
+
+ -v
+   Version of the script.
+
+ -g
+   Generate the BW report
+
+
+EOF
+}
+
+removeTrafficControls() {
+    for NET_IF in ${NET_IF_LIST[*]};do
+        # Clear any existing traffic controls
+        /usr/sbin/tc qdisc del \
+            dev ${NET_IF} \
+            root > /dev/null 2>&1
+
+        ${IPTABLES} --table mangle --flush  > /dev/null 2>&1
+        ${IP6TABLES} --table mangle --flush  > /dev/null 2>&1
+    done
+}
+
+getBandWidth() {
+
+    MY_SIM=$1
+    MY_NE_TYPE=$2
+
+
+    TYPE_1="RNC01 RNC02 RNC03 RNC04 RNC05"
+    TYPE_2="RNC06 RNC07 RNC08 RNC09 RNC10"
+    TYPE_3="RNC11 RNC12 RNC13 RNC14 RNC15"
+    TYPE_4="RNC16 RNC17 RNC18 RNC19 RNC20"
+    TYPE_5="RNC21"
+    TYPE_6=""
+
+    if [[ ${TYPE} == "NRM5.1" ]];then
+        TYPE_1="RNC07 RNC05"
+        TYPE_2="RNC01 RNC02 RNC06 RNC04 RNC08 RNC09 RNC10"
+        TYPE_3="RNC11 RNC12 RNC13 RNC14 RNC15"
+        TYPE_4="RNC16 RNC17 RNC18 RNC19 RNC20"
+        TYPE_5="RNC21"
+        TYPE_6="RNC03"
+    fi
+
+    MY_SIM=`echo ${MY_SIM} | sed s/-/_/g`
+    # See if there is a specific setting for this SIM
+    if [ ${MY_NE_TYPE} = "RNC" ]; then
+
+        echo ${TYPE_1} | grep -w ${MY_SIM} > /dev/null
+        if [ $? -eq 0 ] ; then
+            BANDWIDTH=$(eval "echo \$$(echo BANDWIDTH_${MY_NE_TYPE}_1)")
+        fi
+
+        echo ${TYPE_2} | grep -w ${MY_SIM} > /dev/null
+        if [ $? -eq 0 ] ; then
+            BANDWIDTH=$(eval "echo \$$(echo BANDWIDTH_${MY_NE_TYPE}_2)")
+        fi
+
+        echo ${TYPE_3} | grep -w ${MY_SIM} > /dev/null
+        if [ $? -eq 0 ] ; then
+            BANDWIDTH=$(eval "echo \$$(echo BANDWIDTH_${MY_NE_TYPE}_3)")
+        fi
+
+        echo ${TYPE_4} | grep -w ${MY_SIM} > /dev/null
+        if [ $? -eq 0 ] ; then
+            BANDWIDTH=$(eval "echo \$$(echo BANDWIDTH_${MY_NE_TYPE}_4)")
+        fi
+
+        echo ${TYPE_5} | grep -w ${MY_SIM} > /dev/null
+        if [ $? -eq 0 ] ; then
+            BANDWIDTH=$(eval "echo \$$(echo BANDWIDTH_${MY_NE_TYPE}_5)")
+        fi
+
+        echo ${TYPE_6} | grep -w ${MY_SIM} > /dev/null
+        if [ $? -eq 0 ] ; then
+            BANDWIDTH=$(eval "echo \$$(echo BANDWIDTH_${MY_NE_TYPE}_6)")
+        fi
+
+    else
+        BANDWIDTH=$(eval "echo \$$(echo BANDWIDTH_${MY_NE_TYPE}_${MY_SIM})")
+        if [ -z "${BANDWIDTH}" ] ; then
+            # No specific setting, so get the one for the NE_TYPE
+            BANDWIDTH=$(eval "echo \$$(echo BANDWIDTH_${MY_NE_TYPE})")
+        fi
+    fi
+
+    if [[ -z "${BANDWIDTH}" ]] ; then
+        echo "None"
+        return
+    fi
+
+    echo ${BANDWIDTH}
+    return
+}
+
+getDelay() {
+    MY_SIM=$1
+    MY_NE_TYPE=$2
+
+    if [ -z ${NETWORK_DELAY} ] ; then
+        echo "None"
+        return
+    fi
+
+    echo ${NETWORK_DELAY}
+    return
+}
+
+
+processNode() {
+    MY_IP=$1
+    MY_PARENT=$2
+    MY_INDEX=$3
+    MY_SIM=$4
+    MY_NE_TYPE=$5
+    FILTER_MY_SIM=$(echo ${MY_SIM} | sed 's/\./_/g')
+
+    if [[ "${TYPE}" = "NSS" ]]; then
+        if [[ "${MY_NE_TYPE}" = "FRONTHAUL" ]] || [[ "${MY_NE_TYPE}" = "EPG" ]] || [[ "${MY_NE_TYPE}" = "MTAS" ]] || [[   "${MY_NE_TYPE}" = "DSC" ]] || [[ "${MY_NE_TYPE}" = "SBGIS" ]]; then
+            continue;
+        fi
+    fi
+
+    BANDWIDTH=`getBandWidth ${FILTER_MY_SIM} ${MY_NE_TYPE}`
+    if [[ ${BANDWIDTH} = "None" ]]; then
+        echo "ERROR: Failed to get bandwidth from cfg file for ${MY_SIM}."
+        exit 1
+    fi
+
+    DELAY=`getDelay ${FILTER_MY_SIM} ${MY_NE_TYPE}`
+    if [[ ${DELAY} = "None" ]]; then
+        echo "ERROR: Failed to get delay from cfg file"
+        exit 1
+    fi
+
+    for NET_IF in ${NET_IF_LIST[*]};do
+        printf "%s %s %-15s bw=%dkbit/s delay=%dms %s\n" ${FILTER_MY_SIM} ${MY_NE_TYPE} ${MY_IP} ${BANDWIDTH} ${DELAY} ${NET_IF}
+
+        # Create the queue with the specified bandwidth
+        CLASS_ID=1:${MY_INDEX}
+        /usr/sbin/tc class add \
+            dev ${NET_IF} \
+            parent ${MY_PARENT} \
+            classid ${CLASS_ID} \
+            htb rate ${BANDWIDTH}kbit
+        if [ $? -ne 0 ] ; then
+            echo "ERROR: Failed to define bandwidth class for ${MY_IP}"
+            exit 1
+        fi
+
+        # Create the qdisc to add the delay
+        DELAY_QDISC_NUM=`expr ${MY_INDEX} + 1`
+        DELAY_QDISC="${DELAY_QDISC_NUM}:"
+        /usr/sbin/tc qdisc add \
+            dev ${NET_IF} \
+            parent ${CLASS_ID} \
+            handle ${DELAY_QDISC} \
+            netem delay ${DELAY}ms
+        if [ $? -ne 0 ] ; then
+            echo "ERROR: Failed to define delay qdisc for ${MY_IP}"
+            exit 1
+        fi
+    done
+    # Now we need to get packets going to the IP address
+    # added class for that address
+    echo "${MY_IP}" | grep : > /dev/null
+    if [ $? -eq 0 ] ; then
+        IPTABLES_CMD=${IP6TABLES}
+    else
+        IPTABLES_CMD=${IPTABLES}
+    fi
+    ${IPTABLES_CMD} -t mangle -A POSTROUTING \
+        -s ${MY_IP} \
+        -j CLASSIFY --set-class ${CLASS_ID}
+    if [ $? -ne 0 ] ; then
+        echo "ERROR: Failed to define iptables rule for ${MY_IP}"
+        exit 1
+    fi
+}
+
+validate_node_ip(){
+    input_ip=$1
+    if [[ ${input_ip} = *"."* ]] || [[ ${input_ip} = *":"* ]]; then
+       echo "${node_ip_list}" | grep -w "${input_ip}" > /dev/null
+       if [ $? -eq 0 ]; then
+           echo "False"
+       else
+           echo "True"
+       fi
+    else
+       echo "False"
+    fi
+}
+
+applyTrafficControls()
+{
+    # Get list of RNC IP addresses
+    echo " Reading IP addresses"
+
+    su - netsim -c "echo '.show allsimnes' | /netsim/inst/netsim_pipe"  > /tmp/nodes.txt
+    for NET_IF in ${NET_IF_LIST[*]};do
+
+        # Make sure TSO is disabled
+        TSO_STATUS=`${ETHTOOL} -k ${NET_IF} | egrep '^tcp segmentation offload' | awk '{print $NF}'`
+        if [ "${TSO_STATUS}" = "on" ] ; then
+            echo " Disabling TSO on ${NET_IF}"
+            ${ETHTOOL} -K ${NET_IF} tso off
+        fi
+
+        if [ -z "${NETWORK_DELAY}" ] ; then
+            echo "ERROR: NETWORK_DELAY not set in cfg"
+            exit 1
+        fi
+
+        /usr/sbin/tc qdisc add \
+            dev ${NET_IF} \
+            handle 1: \
+            root \
+            htb default 0
+        if [ $? -ne 0 ] ; then
+            echo "ERROR: Failed to create root htb qdisc"
+            exit 1
+        fi
+
+        # Create default class with full bandwidth of NIC
+        NIC_BANDWIDTH=`${ETHTOOL} ${NET_IF} | awk '{if ($1 == "Speed:") print $2}' | sed 's|Mb/s||'`
+
+        /usr/sbin/tc class add \
+            dev ${NET_IF} \
+            parent 1: \
+            classid 1:0 \
+            htb rate ${NIC_BANDWIDTH}mbit
+    done
+
+    MY_PARENT=1:0
+    INDEX=0
+    for RNC in ${LIST} ; do
+        echo "${RNC}" | egrep -w 'RNC01|RNC02|RNC03|RNC04|RNC05|RNC06|RNC07|RNC08|RNC09|RNC10|RNC11|RNC12|RNC13|RNC14|RNC15|RNC16|RNC17|RNC18|RNC19|RNC20|RNC21' > /dev/null
+        if [ $? -eq 0 ] ; then
+            INDEX=`expr ${INDEX} + 1`
+
+            # Not LTE so assume WRAN (No RNC in LTE) ignore DSC, SAPC, TCU, CSCF, MTAS, SBG, WCG, RNNODE, VPP, VTFRADIONODE, 5GRADIONODE, VRC, VBGF, IPWORKS, C608, MRF, UPG, WMG, EME, VRM, VRSM, VSAPC
+            RNC_IP=`grep -w ${RNC} /tmp/nodes.txt | awk '{print $1" "$2}' | grep -w ${RNC} | cut -d" " -f2`
+            if [ -z "${RNC_IP}" ] ; then
+                echo "ERROR: No IP address found for ${RNC}"
+                exit 1
+            fi
+            processNode ${RNC_IP} ${MY_PARENT} ${INDEX} ${RNC} RNC
+        fi
+    done
+
+    MINILINK_SIM_LIST=`ls /netsim/netsimdir/ | grep 'ML' | grep -v .zip | tr '\n' ' ' | sed 's/.$//'`
+
+    if [ $? -eq 0 ]; then
+        LIST="${LIST} ${MINILINK_SIM_LIST}"
+    fi
+
+    if [[ ! -z ${PLAYBACK_SIM_LIST} ]]; then
+        LIST="${LIST} ${PLAYBACK_SIM_LIST}"
+    fi
+    for SIM in $LIST ; do
+        NODE_B_TYPE="RBS"
+        echo ${SIM} | grep LTE > /dev/null
+        if [ $? -eq 0 ] ; then
+            # LTE nodes
+            NODE_B_TYPE="ERBS"
+        fi
+
+        if [ "${TYPE}" = "NSS" ]; then
+            # Get only RBS
+            RBS_IP_LIST=`grep ${SIM} /tmp/nodes.txt | awk '{print $1" "$2}' | grep RBS | grep -v ERBS |  grep -v PRBS | grep -v pERBS | grep -v dg2ERBS | grep -v MSRBS-V2 | cut -d" " -f2`
+        else
+            # Get only RBS and ERBS only. ignore PRBS, MSRBS_V1 and MSRBS_V2
+            RBS_IP_LIST=`grep ${SIM} /tmp/nodes.txt | awk '{print $1" "$2}' | grep RBS | grep -v PRBS | grep -v pERBS | grep -v dg2ERBS | grep -v MSRBS-V2 | cut -d" " -f2`
+        fi
+        for RBS_IP in ${RBS_IP_LIST} ; do
+            check=`validate_node_ip "${RBS_IP}"`
+            if [[ "${check}" = "True" ]]; then
+                INDEX=`expr ${INDEX} + 1`
+                processNode ${RBS_IP} ${MY_PARENT} ${INDEX} ${SIM} ${NODE_B_TYPE}
+                node_ip_list="${node_ip_list} ${RBS_IP}"
+            fi
+        done
+
+            # For BSC SIM
+            echo "${SIM}" | grep 'BSC' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # BSC Nodes
+                BSC_IP_LIST=`egrep 'BSC' /tmp/nodes.txt | egrep -v MSRBS | awk '{print $2}' | cut -d ',' -f1`
+                for BSC_IP in ${BSC_IP_LIST} ; do
+                    check=`validate_node_ip "${BSC_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        NODE_NAME=`egrep $BSC_IP /tmp/nodes.txt | awk '{print $1}'` 
+                        if [ ${NODE_NAME} = "M48B96" ] && [ "${TYPE}" = "NRM5.1" ]; then
+                           processNode ${BSC_IP} ${MY_PARENT} ${INDEX} ${SIM} ${NODE_NAME}
+                        else
+                           processNode ${BSC_IP} ${MY_PARENT} ${INDEX} ${SIM} BSC
+                        fi
+                        node_ip_list="${node_ip_list} ${BSC_IP}"
+                    fi
+                done
+                #BSC MSRBS-V2 nodes
+                BSC_IP_LIST=`egrep 'BSC' /tmp/nodes.txt | egrep MSRBS | awk '{print $2}' | cut -d ',' -f1`
+                for BSC_IP in ${BSC_IP_LIST} ; do
+                    check=`validate_node_ip "${BSC_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        processNode ${BSC_IP} ${MY_PARENT} ${INDEX} ${SIM} BSC_MSRBS_V2
+                        node_ip_list="${node_ip_list} ${BSC_IP}"
+                    fi
+                done
+            fi
+
+             # For HLR-FE SIM
+            echo "${SIM}" | grep 'HLR-FE' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # HLR-FE Nodes
+                HLR_IP_LIST=`egrep 'HLR-FE' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for HLR_IP in ${HLR_IP_LIST} ; do
+                    check=`validate_node_ip "${HLR_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${HLR_IP} ${MY_PARENT} ${INDEX} ${SIM} HLR
+                        node_ip_list="${node_ip_list} ${HLR_IP}"
+                    fi
+                done
+            fi
+
+            # For 5GRADIONODE SIM
+            echo "${SIM}" | grep -i '5GRADIONODE' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                FIVEGRADIONODE_IP_LIST=`cat /tmp/nodes.txt| grep ${SIM} | grep -i '5GRADIONODE' | awk '{print $2}' | cut -d ',' -f1 | sed '/^\s*$/d'`
+                for FIVEGRADIONODE_IP in ${FIVEGRADIONODE_IP_LIST} ; do
+                    check=`validate_node_ip "${FIVEGRADIONODE_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${FIVEGRADIONODE_IP} ${MY_PARENT} ${INDEX} ${SIM} FIVEGRADIONODE
+                        node_ip_list="${node_ip_list} ${FIVEGRADIONODE_IP}"
+                    fi
+                done
+            fi
+
+            # For VTIF SIM
+            echo "${SIM}" | grep -i 'VTIF' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # VTIF Nodes
+                VTIF_IP_LIST=`egrep 'VTIF' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for VTIF_IP in ${VTIF_IP_LIST} ; do
+                    check=`validate_node_ip "${VTIF_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${VTIF_IP} ${MY_PARENT} ${INDEX} ${SIM} VTIF
+                        node_ip_list="${node_ip_list} ${VTIF_IP}"
+                    fi
+                done
+            fi
+
+            # For MSC SIM
+            echo "${SIM}" | grep 'MSC' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # MSC Nodes
+                MSC_IP_LIST=`egrep 'MSC' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for MSC_IP in ${MSC_IP_LIST} ; do
+                    check=`validate_node_ip "${MSC_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${MSC_IP} ${MY_PARENT} ${INDEX} ${SIM} MSC
+                        node_ip_list="${node_ip_list} ${MSC_IP}"
+                    fi
+                done
+            fi
+            # For BSP SIM
+            echo "${SIM}" | egrep -v 'MSC|HLR' | grep 'BSP' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # BSP Nodes
+                BSP_IP_LIST=`egrep -v MSC /tmp/nodes.txt| egrep 'BSP' | awk '{print $2}' | cut -d ',' -f1`
+                for BSP_IP in ${BSP_IP_LIST} ; do
+                    check=`validate_node_ip "${BSP_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${BSP_IP} ${MY_PARENT} ${INDEX} ${SIM} BSP
+                        node_ip_list="${node_ip_list} ${BSP_IP}"
+                    fi
+                done
+            fi
+
+            # For EPG SIMs
+            echo "${SIM}" | grep 'EPG' | grep -v 'EPG-OI' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # EPG Nodes
+                                EPG_IP_LIST=`cat /tmp/nodes.txt| grep 'EPG' | grep -v 'EPG-OI' | awk '{print $2}' | cut -d ',' -f1`
+                for EPG_IP in ${EPG_IP_LIST} ; do
+                    check=`validate_node_ip "${EPG_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${EPG_IP} ${MY_PARENT} ${INDEX} ${SIM} EPG
+                        node_ip_list="${node_ip_list} ${EPG_IP}"
+                    fi
+                done
+            fi
+
+            # For MTAS SIMs
+            echo "${SIM}" | grep 'MTAS' | grep -v 'TSP' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # MTAS Nodes
+                MTAS_IP_LIST=`egrep "${SIM}" /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for MTAS_IP in ${MTAS_IP_LIST} ; do
+                    check=`validate_node_ip "${MTAS_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${MTAS_IP} ${MY_PARENT} ${INDEX} ${SIM} MTAS
+                        node_ip_list="${node_ip_list} ${MTAS_IP}"
+                    fi
+                done
+            fi
+            # For SCEF SIMs
+            echo "${SIM}" | grep 'SCEF' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # SCEF Nodes
+                SCEF_IP_LIST=`egrep "${SIM}" /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for SCEF_IP in ${SCEF_IP_LIST} ; do
+                    check=`validate_node_ip "${SCEF_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${SCEF_IP} ${MY_PARENT} ${INDEX} ${SIM} SCEF
+                        node_ip_list="${node_ip_list} ${SCEF_IP}"
+                    fi
+                done
+            fi
+            # For DSC SIMs
+            echo "${SIM}" | grep 'DSC' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # DSC Nodes
+                DSC_IP_LIST=`egrep 'DSC' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for DSC_IP in ${DSC_IP_LIST} ; do
+                    check=`validate_node_ip "${DSC_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${DSC_IP} ${MY_PARENT} ${INDEX} ${SIM} DSC
+                        node_ip_list="${node_ip_list} ${DSC_IP}"
+                    fi
+                done
+            fi
+            # For TSP SIMs
+            echo "${SIM}" | egrep 'MTAS-TSP|SAPC-TSP|CSCF-TSP|HSS-FE-TSP'  > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # TSP Nodes
+                TSP_IP_LIST=`egrep ${SIM} /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for TSP_IP in ${TSP_IP_LIST} ; do
+                    check=`validate_node_ip "${TSP_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${TSP_IP} ${MY_PARENT} ${INDEX} ${SIM} TSP
+                        node_ip_list="${node_ip_list} ${TSP_IP}"
+                    fi
+                done
+            fi
+            
+            # For HSS-FE
+            if [[ ${TYPE} == "MD_1" ]];then
+                echo "${SIM}" | egrep 'HSS-FE'  > /dev/null
+                if [ $? -eq 0 ] ; then
+                    INDEX=`expr ${INDEX} + 1`
+                    # TSP Nodes
+                    HSS_FE_IP_LIST=`egrep ${SIM} /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                    for HSS_FE_IP in ${HSS_FE_IP_LIST} ; do
+                        check=`validate_node_ip "${HSS_FE_IP}"`
+                        if [[ "${check}" = "True" ]]; then
+                            INDEX=`expr ${INDEX} + 1`
+                            SIM=`echo ${SIM} | sed 's/\./_/g'`
+                            processNode ${HSS_FE_IP} ${MY_PARENT} ${INDEX} ${SIM} HSS_FE
+                            node_ip_list="${node_ip_list} ${HSS_FE_IP}"
+                        fi
+                    done
+                fi
+            fi
+            
+            # For SBGIS SIMs
+            echo "${SIM}" | grep 'SBG-IS' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # SBGIS Nodes
+                SBGIS_IP_LIST=`egrep 'SBG-IS' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for SBGIS_IP in ${SBGIS_IP_LIST} ; do
+                    check=`validate_node_ip "${SBGIS_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${SBGIS_IP} ${MY_PARENT} ${INDEX} ${SIM} SBGIS
+                        node_ip_list="${node_ip_list} ${SBGIS_IP}"
+                    fi
+                done
+            fi
+
+            # For CUDB SIMS
+            echo "${TYPE}" | egrep 'NRM' > /dev/null
+            if [ $? -eq 0 ]; then
+                echo "${SIM}" | grep 'CUDB' > /dev/null
+                if [ $? -eq 0 ] ; then
+                    INDEX=`expr ${INDEX} + 1`
+                    # CUDB Nodes
+                    CUDB_IP_LIST=`egrep 'CUDB' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                    for CUDB_IP in ${CUDB_IP_LIST} ; do
+                        check=`validate_node_ip "${CUDB_IP}"`
+                        if [[ "${check}" = "True" ]]; then
+                            INDEX=`expr ${INDEX} + 1`
+                            SIM=`echo ${SIM} | sed 's/\./_/g'`
+                            processNode ${CUDB_IP} ${MY_PARENT} ${INDEX} ${SIM} CUDB
+                            node_ip_list="${node_ip_list} ${CUDB_IP}"
+                        fi
+                    done
+                fi
+            fi 
+
+            # For AFG SIMS
+            echo "${SIM}" | grep 'AFG' > /dev/null
+            if [ $? -eq 0 ] ; then
+               INDEX=`expr ${INDEX} + 1`
+                # AFG Nodes
+                AFG_IP_LIST=`egrep 'AFG' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for AFG_IP in ${AFG_IP_LIST} ; do
+                    check=`validate_node_ip "${AFG_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${AFG_IP} ${MY_PARENT} ${INDEX} ${SIM} AFG
+                        node_ip_list="${node_ip_list} ${AFG_IP}"
+                    fi
+                done
+            fi
+
+            # For ADP SIMS
+            echo "${SIM}" | grep 'ADP' > /dev/null
+            if [ $? -eq 0 ] ; then
+               INDEX=`expr ${INDEX} + 1`
+                # ADP Nodes
+                ADP_IP_LIST=`egrep 'ADP' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for ADP_IP in ${ADP_IP_LIST} ; do
+                    check=`validate_node_ip "${ADP_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${ADP_IP} ${MY_PARENT} ${INDEX} ${SIM} ADP
+                        node_ip_list="${node_ip_list} ${ADP_IP}"
+                    fi
+                done
+            fi
+
+            # For EIR-FE SIMS
+            echo "${SIM}" | grep 'EIR-FE'  > /dev/null
+            if [ $? -eq 0 ] ; then
+               INDEX=`expr ${INDEX} + 1`
+                # EIR-FE Nodes
+                EIR_FE_IP_LIST=`grep 'EIR-FE' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for EIR_FE_IP in ${EIR_FE_IP_LIST} ; do
+                    check=`validate_node_ip "${EIR_FE_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${EIR_FE_IP} ${MY_PARENT} ${INDEX} ${SIM} EIR_FE
+                        node_ip_list="${node_ip_list} ${EIR_FE_IP}"
+                    fi
+                done
+            fi
+
+            # For FrontHaul SIMs
+            echo "${SIM}" | grep 'FrontHaul' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # FrontHaul Nodes
+                FRONTHAUL_IP_LIST=`egrep 'FrontHaul' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for FRONTHAUL_IP in ${FRONTHAUL_IP_LIST} ; do
+                    check=`validate_node_ip "${FRONTHAUL_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${FRONTHAUL_IP} ${MY_PARENT} ${INDEX} ${SIM} FRONTHAUL
+                        node_ip_list="${node_ip_list} ${FRONTHAUL_IP}"
+                    fi
+                done
+            fi
+
+            # For vDU SIMs
+            echo "${SIM}" | grep -w 'vDU' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # vDU Nodes
+                VDU_IP_LIST=`grep -w 'vDU' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for VDU_IP in ${VDU_IP_LIST} ; do
+                    check=`validate_node_ip "${VDU_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${VDU_IP} ${MY_PARENT} ${INDEX} ${SIM} VDU
+                        node_ip_list="${node_ip_list} ${VDU_IP}"
+                    fi
+                done
+            fi
+            
+            # For RDM SIMs
+            if [ "${TYPE}" = "NSS" ]; then
+                echo "${SIM}" | grep -w 'RDM' > /dev/null
+                if [ $? -eq 0 ] ; then
+                    INDEX=`expr ${INDEX} + 1`
+                    # RDM Nodes
+                    RDM_IP_LIST=`grep -w 'RDM' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                    for RDM_IP in ${RDM_IP_LIST} ; do
+                        check=`validate_node_ip "${RDM_IP}"`
+                        if [[ "${check}" = "True" ]]; then
+                            INDEX=`expr ${INDEX} + 1`
+                            SIM=`echo ${SIM} | sed 's/\./_/g'`
+                            processNode ${RDM_IP} ${MY_PARENT} ${INDEX} ${SIM} RDM
+                            node_ip_list="${node_ip_list} ${RDM_IP}"
+                        fi
+                    done
+                fi
+            fi
+
+            # For vCU-UP SIMs
+            if [[ "${TYPE}" = "NSS" ]] || [[ "${TYPE}" = "MD_1" ]]; then
+                echo "${SIM}" | grep 'vCU-UP' > /dev/null
+                if [ $? -eq 0 ] ; then
+                    INDEX=`expr ${INDEX} + 1`
+                    # vCU-UP Nodes
+                    VCU_UP_IP_LIST=`grep 'vCU-UP' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                    for VCU_UP_IP in ${VCU_UP_IP_LIST} ; do
+                        check=`validate_node_ip "${VCU_UP_IP}"`
+                        if [[ "${check}" = "True" ]]; then
+                            INDEX=`expr ${INDEX} + 1`
+                            SIM=`echo ${SIM} | sed 's/\./_/g'`
+                            processNode ${VCU_UP_IP} ${MY_PARENT} ${INDEX} ${SIM} VCU_UP
+                            node_ip_list="${node_ip_list} ${VCU_UP_IP}"
+                        fi
+                    done
+                fi
+            fi
+
+            # For vCU-CP SIMs
+            if [[ "${TYPE}" = "NSS" ]] || [[ "${TYPE}" = "MD_1" ]]; then
+                echo "${SIM}" | grep 'vCU-CP' > /dev/null
+                if [ $? -eq 0 ] ; then
+                    INDEX=`expr ${INDEX} + 1`
+                    # vCU-CP Nodes
+                    VCU_CP_IP_LIST=`grep 'vCU-CP' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                    for VCU_CP_IP in ${VCU_CP_IP_LIST} ; do
+                        check=`validate_node_ip "${VCU_CP_IP}"`
+                        if [[ "${check}" = "True" ]]; then
+                            INDEX=`expr ${INDEX} + 1`
+                            SIM=`echo ${SIM} | sed 's/\./_/g'`
+                            processNode ${VCU_CP_IP} ${MY_PARENT} ${INDEX} ${SIM} VCU_CP
+                            node_ip_list="${node_ip_list} ${VCU_CP_IP}"
+                        fi
+                    done
+                fi
+            fi
+
+            # For Controller6610 SIMs
+            echo "${SIM}" | grep -w 'CONTROLLER6610' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # Controller Nodes
+                CONTROLLER6610_IP_LIST=`grep 'CONTROLLER6610' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for CONTROLLER6610_IP in ${CONTROLLER6610_IP_LIST} ; do
+                    check=`validate_node_ip "${CONTROLLER6610_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${CONTROLLER6610_IP} ${MY_PARENT} ${INDEX} ${SIM} CONTROLLER6610
+                        node_ip_list="${node_ip_list} ${CONTROLLER6610_IP}"
+                    fi
+                done
+            fi
+
+            # For vNSDS SIMs
+            echo "${SIM}" | grep -i 'vNSDS' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # vNSDS Nodes
+                VNSDS_IP_LIST=`grep 'vNSDS' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for VNSDS_IP in ${VNSDS_IP_LIST} ; do
+                    check=`validate_node_ip "${VNSDS_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        SIM=`echo ${SIM} | sed 's/\./_/g'`
+                        processNode ${VNSDS_IP} ${MY_PARENT} ${INDEX} ${SIM} VNSDS
+                        node_ip_list="${node_ip_list} ${VNSDS_IP}"
+                    fi
+                done
+            fi
+
+            echo "${SIM}" | egrep 'TCU02' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # BSC Nodes
+                TCU02_IP_LIST=`egrep 'TCU02' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for TCU02_IP in ${TCU02_IP_LIST} ; do
+                    check=`validate_node_ip "${TCU02_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        processNode ${TCU02_IP} ${MY_PARENT} ${INDEX} ${SIM} TCU02
+                        node_ip_list="${node_ip_list} ${TCU02_IP}"
+                    fi
+                done
+            fi
+
+            echo "${SIM}" | egrep 'SIU02' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # BSC Nodes
+                SIU02_IP_LIST=`egrep 'SIU02' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for SIU02_IP in ${SIU02_IP_LIST} ; do
+                    check=`validate_node_ip "${SIU02_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        processNode ${SIU02_IP} ${MY_PARENT} ${INDEX} ${SIM} SIU02
+                        node_ip_list="${node_ip_list} ${SIU02_IP}"
+                    fi
+                done
+             fi
+
+            echo "${SIM}" | egrep 'ERSN' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # BSC Nodes
+                ERSN_IP_LIST=`egrep 'ERSN' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for ERSN_IP in ${ERSN_IP_LIST} ; do
+                    check=`validate_node_ip "${ERSN_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        processNode ${ERSN_IP} ${MY_PARENT} ${INDEX} ${SIM} ERSN
+                        node_ip_list="${node_ip_list} ${ERSN_IP}"
+                    fi
+                done
+            fi
+
+            echo "${SIM}" | egrep 'ERS[-_]SN[-_]ESC' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # BSC Nodes
+                ERS_SN_ESC_IP_LIST=`egrep 'ERS[-_]SN[-_]ESC' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for ERS_SN_ESC_IP in ${ERS_SN_ESC_IP_LIST} ; do
+                    check=`validate_node_ip "${ERS_SN_ESC_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        processNode ${ERS_SN_ESC_IP} ${MY_PARENT} ${INDEX} ${SIM} ERS_SN_ESC
+                        node_ip_list="${node_ip_list} ${ERS_SN_ESC_IP}"
+                    fi
+                done
+            fi
+
+             echo "${SIM}" | egrep 'ERS[-_]SN[-_]SCU|SCU[-_]' > /dev/null
+             if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # BSC Nodes
+                ERS_SN_SCU_IP_LIST=`egrep 'ERS[-_]SN[-_]SCU|SCU[-_]' /tmp/nodes.txt | awk '{print $2}' | cut -d ',' -f1`
+                for ERS_SN_SCU_IP in ${ERS_SN_SCU_IP_LIST} ; do
+                    check=`validate_node_ip "${ERS_SN_SCU_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        processNode ${ERS_SN_SCU_IP} ${MY_PARENT} ${INDEX} ${SIM} ERS_SN_SCU
+                        node_ip_list="${node_ip_list} ${ERS_SN_SCU_IP}"
+                    fi
+                done
+            fi
+
+        echo "${SIM}" | egrep -i 'UDM' > /dev/null
+        if [ $? -eq 0 ] ; then
+            INDEX=`expr ${INDEX} + 1`
+            # UDM Nodes
+            UDM_IP_LIST=`grep UDM /tmp/nodes.txt | awk '{print $2}'`
+            for UDM_IP in ${UDM_IP_LIST} ; do
+                check=`validate_node_ip "${UDM_IP}"`
+                if [[ "${check}" = "True" ]]; then
+                    INDEX=`expr ${INDEX} + 1`
+                    processNode ${UDM_IP} ${MY_PARENT} ${INDEX} ${SIM} UDM
+                    node_ip_list="${node_ip_list} ${UDM_IP}"
+                fi
+            done
+        fi
+
+        echo "${SIM}" | egrep -i 'UDR' > /dev/null
+        if [ $? -eq 0 ] ; then
+            INDEX=`expr ${INDEX} + 1`
+            # UDR Nodes
+            UDR_IP_LIST=`grep UDR /tmp/nodes.txt | awk '{print $2}'`
+            for UDR_IP in ${UDR_IP_LIST} ; do
+                check=`validate_node_ip "${UDR_IP}"`
+                if [[ "${check}" = "True" ]]; then
+                    INDEX=`expr ${INDEX} + 1`
+                    processNode ${UDR_IP} ${MY_PARENT} ${INDEX} ${SIM} UDR
+                    node_ip_list="${node_ip_list} ${UDR_IP}"
+                fi
+            done
+        fi
+
+        echo "${SIM}" | egrep -i 'NRF' > /dev/null
+        if [ $? -eq 0 ] ; then
+            INDEX=`expr ${INDEX} + 1`
+            # NRF Nodes
+            NRF_IP_LIST=`grep NRF /tmp/nodes.txt | awk '{print $2}'`
+            for NRF_IP in ${NRF_IP_LIST} ; do
+                check=`validate_node_ip "${NRF_IP}"`
+                if [[ "${check}" = "True" ]]; then
+                    INDEX=`expr ${INDEX} + 1`
+                    processNode ${NRF_IP} ${MY_PARENT} ${INDEX} ${SIM} NRF
+                    node_ip_list="${node_ip_list} ${NRF_IP}"
+                fi
+            done
+        fi
+
+        echo "${SIM}" | egrep -i 'NSSF' > /dev/null
+        if [ $? -eq 0 ] ; then
+            INDEX=`expr ${INDEX} + 1`
+            # NSSF Nodes
+            NSSF_IP_LIST=`grep NSSF /tmp/nodes.txt | awk '{print $2}'`
+            for NSSF_IP in ${NSSF_IP_LIST} ; do
+                check=`validate_node_ip "${NSSF_IP}"`
+                if [[ "${check}" = "True" ]]; then
+                    INDEX=`expr ${INDEX} + 1`
+                    processNode ${NSSF_IP} ${MY_PARENT} ${INDEX} ${SIM} NSSF
+                    node_ip_list="${node_ip_list} ${NSSF_IP}"
+                fi
+            done
+        fi
+
+        #Support for WRAN MSRBS_V2 nodes
+        if [ "${TYPE}" = "NSS" ]; then
+            WRAN_MSRBS_IP_LIST=`grep ${SIM} /tmp/nodes.txt | grep 'MSRBS-V2' | grep 'RNC' | grep -v 'dg2ERBS' | awk '{print $2}'`
+        else
+            WRAN_MSRBS_IP_LIST=`grep ${SIM} /tmp/nodes.txt | egrep 'dg2ERBS|MSRBS-V2' | grep 'RNC' | awk '{print $2}'`
+        fi
+
+        for WRAN_MRBS_IP in ${WRAN_MSRBS_IP_LIST} ; do
+            check=`validate_node_ip "${WRAN_MRBS_IP}"`
+            if [[ "${check}" = "True" ]]; then
+                INDEX=`expr ${INDEX} + 1`
+                processNode ${WRAN_MRBS_IP} ${MY_PARENT} ${INDEX} ${SIM} WRAN_MSRBS_V2
+                node_ip_list="${node_ip_list} ${WRAN_MRBS_IP}"
+            fi
+        done
+
+        #Support for LTE MSRBS_V2 nodes
+        if [ "${TYPE}" = "NSS" ]; then
+            MSRBS_IP_LIST=`grep ${SIM} /tmp/nodes.txt | grep 'MSRBS-V2' | grep 'LTE' | grep -v 'dg2ERBS' | awk '{print $2}'`
+        else
+            MSRBS_IP_LIST=`grep ${SIM} /tmp/nodes.txt | egrep 'dg2ERBS|MSRBS-V2' | grep 'LTE' | awk '{print $2}'`
+        fi
+
+        for MRBS_IP in ${MSRBS_IP_LIST} ; do
+            check=`validate_node_ip "${MRBS_IP}"`
+            if [[ "${check}" = "True" ]]; then
+                INDEX=`expr ${INDEX} + 1`
+                processNode ${MRBS_IP} ${MY_PARENT} ${INDEX} ${SIM} LTE_MSRBS_V2
+                node_ip_list="${node_ip_list} ${MRBS_IP}"
+            fi
+        done
+
+        #Support for R6673 nodes in NSS only
+        if [ "${TYPE}" = "NSS" ]; then
+            echo "${SIM}" | egrep -i 'R6673|Router6673' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # SPITFIRE Nodes
+                R6673_IP_LIST=`grep R6673 /tmp/nodes.txt | awk '{print $2}'`
+                for R6673_IP in ${R6673_IP_LIST} ; do
+                    check=`validate_node_ip "${R6673_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        processNode ${R6673_IP} ${MY_PARENT} ${INDEX} ${SIM} R6673
+                        node_ip_list="${node_ip_list} ${R6673_IP}"
+                    fi
+                done
+            fi
+        fi
+
+        if [ "${TYPE}" != "NSS" ]; then
+
+            # For PRBS of RNC
+            PRBS_IP_LIST=`grep ${SIM} /tmp/nodes.txt | grep PRBS | awk '{print $2}'`
+            for PRBS_IP in ${PRBS_IP_LIST} ; do
+                check=`validate_node_ip "${PRBS_IP}"`
+                if [[ "${check}" = "True" ]]; then
+                    INDEX=`expr ${INDEX} + 1`
+                    processNode ${PRBS_IP} ${MY_PARENT} ${INDEX} ${SIM} PRBS
+                    node_ip_list="${node_ip_list} ${PRBS_IP}"
+                fi
+            done
+
+            #Support for MSRBS_V1 nodes of LTE
+            MSRBS_IP_LIST=`grep ${SIM} /tmp/nodes.txt | grep pERBS | awk '{print $2}'`
+            for MRBS_IP in ${MSRBS_IP_LIST} ; do
+                check=`validate_node_ip "${MRBS_IP}"`
+                if [[ "${check}" = "True" ]]; then
+                    INDEX=`expr ${INDEX} + 1`
+                    processNode ${MRBS_IP} ${MY_PARENT} ${INDEX} ${SIM} MSRBS_V1
+                    node_ip_list="${node_ip_list} ${MRBS_IP}"
+                fi
+            done
+
+
+            #Support for GNODEBRADIO node
+            echo "${SIM}" | grep -i 'gNodeBRadio' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                GNODEBRADIO_IP_LIST=`grep "gNodeBRadio" /tmp/nodes.txt | grep -i 'gNodeBRadio' | awk '{print $2}'`
+                for GNODEBRADIO_IP in ${GNODEBRADIO_IP_LIST} ; do
+                    check=`validate_node_ip "${GNODEBRADIO_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                       INDEX=`expr ${INDEX} + 1`
+                       processNode ${GNODEBRADIO_IP} ${MY_PARENT} ${INDEX} ${SIM} GNODEBRADIO
+                       node_ip_list="${node_ip_list} ${GNODEBRADIO_IP}"
+                    fi
+                done
+            fi
+
+            # For SPITFIRE SIM
+            echo "${SIM}" | grep 'SpitFire' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # SPITFIRE Nodes
+                SPITFIRE_IP_LIST=`grep SPFR /tmp/nodes.txt | awk '{print $2}'`
+                for SPITFIRE_IP in ${SPITFIRE_IP_LIST} ; do
+                    check=`validate_node_ip "${SPITFIRE_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        processNode ${SPITFIRE_IP} ${MY_PARENT} ${INDEX} ${SIM} SPITFIRE
+                        node_ip_list="${node_ip_list} ${SPITFIRE_IP}"
+                    fi
+                done
+            fi
+
+            echo "${SIM}" | egrep -i 'R6274|Router6274' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # SPITFIRE Nodes
+                R6274_IP_LIST=`grep R6274 /tmp/nodes.txt | awk '{print $2}'`
+                for R6274_IP in ${R6274_IP_LIST} ; do
+                    check=`validate_node_ip "${R6274_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        processNode ${R6274_IP} ${MY_PARENT} ${INDEX} ${SIM} R6274
+                        node_ip_list="${node_ip_list} ${R6274_IP}"
+                    fi
+                done
+            fi
+
+            echo "${SIM}" | egrep -i 'R6672|Router6672' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # SPITFIRE Nodes
+                R6672_IP_LIST=`grep R6672 /tmp/nodes.txt | awk '{print $2}'`
+                for R6672_IP in ${R6672_IP_LIST} ; do
+                    check=`validate_node_ip "${R6672_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        processNode ${R6672_IP} ${MY_PARENT} ${INDEX} ${SIM} R6672
+                        node_ip_list="${node_ip_list} ${R6672_IP}"
+                    fi
+                done
+            fi
+
+            echo "${SIM}" | egrep -i 'R6675|Router6675' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                # SPITFIRE Nodes
+                R6675_IP_LIST=`grep R6675 /tmp/nodes.txt | awk '{print $2}'`
+                for R6675_IP in ${R6675_IP_LIST} ; do
+                    check=`validate_node_ip "${R6675_IP}"`
+                    if [[ "${check}" = "True" ]]; then
+                        INDEX=`expr ${INDEX} + 1`
+                        processNode ${R6675_IP} ${MY_PARENT} ${INDEX} ${SIM} R6675
+                        node_ip_list="${node_ip_list} ${R6675_IP}"
+                    fi
+                done
+            fi
+
+            # For MGw SIM
+            echo "${SIM}" | grep 'MGw' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                 # MGw Nodes
+                 MGw_IP_LIST=`egrep 'MGw|K3C' /tmp/nodes.txt | awk '{print $2}'`
+                 for MGw_IP in ${MGw_IP_LIST} ; do
+                     check=`validate_node_ip "${MGw_IP}"`
+                     if [[ "${check}" = "True" ]]; then
+                         INDEX=`expr ${INDEX} + 1`
+                         processNode ${MGw_IP} ${MY_PARENT} ${INDEX} ${SIM} MGW
+                         node_ip_list="${node_ip_list} ${MGw_IP}"
+                     fi
+                 done
+             fi
+
+            # For MRS SIM
+            echo "${SIM}" | grep 'MRS' > /dev/null
+            if [ $? -eq 0 ] ; then
+                INDEX=`expr ${INDEX} + 1`
+                 # MRS Nodes
+                 MRS_IP_LIST=`egrep 'MRS' /tmp/nodes.txt | awk '{print $2}'`
+                 for MRS_IP in ${MRS_IP_LIST} ; do
+                     check=`validate_node_ip "${MRS_IP}"`
+                     if [[ "${check}" = "True" ]]; then
+                         INDEX=`expr ${INDEX} + 1`
+                         processNode ${MRS_IP} ${MY_PARENT} ${INDEX} ${SIM} MRS
+                         node_ip_list="${node_ip_list} ${MRS_IP}"
+                     fi
+                 done
+             fi
+        fi
+        # For Minilink SIM
+        echo "${SIM}" | grep 'ML' > /dev/null
+        if [ $? -eq 0 ] ; then
+            echo "${SIM}" | grep 'ML6371' > /dev/null
+            if [ $? -eq 0 ] && [ "${TYPE}" = "NSS" ]  ; then
+                ML_IP_LIST=`grep "ML6371" /tmp/nodes.txt | awk '{print $2}'`
+            elif [ "${TYPE}" != "NSS" ] ; then
+                ML_IP_LIST=`grep ML /tmp/nodes.txt | awk '{print $2}'`
+            fi
+            for ML_IP in ${ML_IP_LIST} ; do
+                check=`validate_node_ip "${ML_IP}"`
+                if [[ "${check}" = "True" ]]; then
+                    INDEX=`expr ${INDEX} + 1`
+                    processNode ${ML_IP} ${MY_PARENT} ${INDEX} ${SIM} ML
+                    node_ip_list="${node_ip_list} ${ML_IP}"
+                fi
+            done
+        fi
+    done
+}
+
+
+showScriptVersion()
+{
+  echo "Script Version: "${VER}
+}
+
+
+#This method genertes the netsim traffic contol report based on the started nodes.
+generateTrafficControlsReport()
+{
+    ${IPTABLES} --table mangle --list --numeric > /tmp/iptables.txt 2>&1
+    ${IP6TABLES} --table mangle --list --numeric > /tmp/iptables6.txt 2>&1
+
+    # su - netsim -c "echo '.show allsimnes' | /netsim/inst/netsim_pipe" | egrep '^ *RNC|^ *LTE|^ *DSC|^ *STN'  > /tmp/nodeDetails.txt
+    su - netsim -c "echo '.show started' | /netsim/inst/netsim_pipe" > /tmp/nodeDetails.txt
+
+    # Remove the file present   
+    rm -f "/tmp/netsim_tc_report.txt" "/tmp/node_ip_bw.txt"
+
+    for NET_IF in ${NET_IF_LIST[*]};do
+        # Fetch and store the delay
+        /usr/sbin/tc qdisc show dev ${NET_IF} > /tmp/node_delay_${NET_IF}.txt
+        # Fetch and store the bandwidth
+        /usr/sbin/tc class show dev ${NET_IF} > /tmp/node_bw_${NET_IF}.txt
+
+        NF=`head -1 /tmp/node_bw_${NET_IF}.txt  | awk '{print NF}'`
+
+        while read line
+        do
+            echo $line | grep "server_" > /dev/null
+            if [ $? -eq 0 ]
+            then
+                NETYPE=`echo $line |awk -F"," '{print $1}' | awk '{print $(NF-1) }'`
+            fi
+
+            echo $line | grep "/netsim/netsimdir" > /dev/null
+            if [ $? -eq 0 ]
+            then
+                NEINFO=`echo $line | sed 's|/netsim/netsimdir/||g'`
+                NENAME=`echo $NEINFO | awk '{print $1}'`
+                NEIP=`echo $NEINFO | awk '{print $2}' | cut -d ',' -f1`
+                CLASS=`cat /tmp/iptables.txt | awk -v MATCH="$NEIP" '{if ($4 == MATCH) print $NF}'`
+
+                if [ -z "${CLASS}" ] ; then
+                    CLASS=`cat /tmp/iptables6.txt | sed 's|/[0-9]*||' | awk -v MATCH="$NEIP" '{if ($3 == MATCH) print $NF}'`
+                fi
+
+                SIM=`echo $NEINFO | awk '{print $NF}'`
+                if [ $NF -ne 16 ] ; then
+                    BANDWIDTH=`cat /tmp/node_bw_${NET_IF}.txt | awk -v MATCH="$CLASS" '{if ($3== MATCH) print $11}'`
+                else
+                    BANDWIDTH=`cat /tmp/node_bw_${NET_IF}.txt | awk -v MATCH="$CLASS" '{if ($3== MATCH) print $10}'`
+                fi
+                if [ -z "$BANDWIDTH" ]
+                then
+                    BANDWIDTH="NA"
+                fi
+                DELAY=`cat /tmp/node_delay_${NET_IF}.txt | awk -v MATCH="$CLASS" '{if ($5== MATCH) print $9}'`
+                if [ -z "$DELAY" ]
+                then
+                    DELAY="NA"
+                fi
+
+                #Validating BW/delay on Node IP across all NICs
+                if [ -f /tmp/node_ip_bw.txt ];then
+                    NODE_BW_DL=$(cat /tmp/node_ip_bw.txt | grep "${NEIP}|")
+                    if [[ ! -z ${NODE_BW_DL} ]];then
+                        BW=$(echo ${NODE_BW_DL} | cut -d"|" -f2)
+						DL=$(echo ${NODE_BW_DL} | cut -d"|" -f3)
+                        if [[ ${BW} == ${BANDWIDTH} && ${DL} == ${DELAY} ]];then
+                            continue
+                        else
+                            echo "ERROR : Issue in BW limit/Delay set up. BW Report will not be generated"
+                            exit
+                        fi
+                    fi
+                fi
+                echo "${NEIP}|${BANDWIDTH}|${DELAY}" >> /tmp/node_ip_bw.txt
+                echo "${NETYPE} ${BANDWIDTH} ${DELAY} ${SIM}" >> /tmp/netsim_tc_report.txt
+            fi
+        done < /tmp/nodeDetails.txt
+   done
+
+    DDCPATH="/var/tmp/ddc_data/"
+    DDCDIR=`date "+%d%m%y"`
+    DDCFILENAME="netsim_nodes_perfstats.txt"
+    if [ -d "$DDCPATH$DDCDIR" ]
+    then
+        DDCFILE="$DDCPATH$DDCDIR/$DDCFILENAME"
+        echo "Netsim traffic control report will be written in the file $DDCFILE"
+    else
+        DDCFILE="/tmp/$DDCFILENAME"
+        echo "$DDCPATH$DDCDIR does not exist. Netsim traffic control report will be written in the file $DDCFILE"
+    fi
+
+    NETSIM=`hostname`
+
+    printf "%-10s %-10s %-10s %-20s %-40s %-10s %s\n" "Type" "Bandwidth" "Latency" "No. of Nodes" "Simulation" "Netsim Server" > $DDCFILE
+    while read line
+    do
+        COUNT=`echo $line | awk '{print $1}'`
+        TYPE=`echo $line | awk '{print $2}'`
+        BW=`echo $line | awk '{print $3}'`
+        LATENCY=`echo $line | awk '{print $4}'`
+        SIM=`echo $line | awk '{print $5}'`
+        printf "%-10s %-10s %-10s %-20s %-40s %-10s %s\n" ${TYPE} ${BW} ${LATENCY} ${COUNT} ${SIM} ${NETSIM} >> $DDCFILE
+    done < <(cat /tmp/netsim_tc_report.txt | sort | uniq -c)
+}
+
+showTrafficControls()
+{
+    ${IPTABLES} --table mangle --list --numeric > /tmp/iptables.txt 2>&1
+    ${IP6TABLES} --table mangle --list --numeric > /tmp/iptables6.txt 2>&1
+
+    su - netsim -c "echo '.show allsimnes' | /netsim/inst/netsim_pipe" | sort > /tmp/nodes.txt
+
+    printf "%-20s %-10s %-10s %-15s %s\n" "NODE" "BANDWIDTH" "DELAY" "IPADDRESS" "NET_IF"
+    for NET_IF in ${NET_IF_LIST[*]};do
+        /usr/sbin/tc qdisc show dev ${NET_IF} > /tmp/node_delay_${NET_IF}.txt
+
+        # Fetch and store the bandwidth
+        /usr/sbin/tc class show dev ${NET_IF} | sort -n -k 7 > /tmp/node_bw_${NET_IF}.txt
+
+        NF=`head -1 /tmp/node_bw_${NET_IF}.txt  | awk '{print NF}'`
+
+        while read line; do
+            CLASS=`echo ${line} | awk '{print $3}'`
+            if [ "${CLASS}" != "1:" ] ; then
+
+                if [ ${NF} -ne 16 ] ; then
+                    BANDWIDTH=`echo ${line} | awk '{print $11}'`
+                else
+                    BANDWIDTH=`echo ${line} | awk '{print $10}'`
+                fi
+                IPADDRESS=`cat /tmp/iptables.txt | awk -v MATCH="$CLASS" '{if ($NF == MATCH) print $4}'`
+                if [ -z "${IPADDRESS}" ] ; then
+                    IPADDRESS=`cat /tmp/iptables6.txt | awk -v MATCH="$CLASS" '{if ($NF == MATCH) print $3}' | sed 's|/.*$||'`
+                fi
+
+                DELAY=`cat /tmp/node_delay_${NET_IF}.txt | awk -v MATCH="$CLASS" '{if ($5== MATCH) print $9}'`
+
+                if [ ! -z "${IPADDRESS}" ] ; then
+                    NODE=`cat /tmp/nodes.txt | awk -v IP=$IPADDRESS '{if ($2 == IP) print $1}'`
+                    printf "%-20s %-10s %-10s %-15s %s\n" ${NODE} ${BANDWIDTH} ${DELAY} ${IPADDRESS} ${NET_IF}
+
+                fi
+            fi
+        done < /tmp/node_bw_${NET_IF}.txt
+    done
+}
+
+setNetIfSuseOs(){
+
+    # interface used for default destination
+    NET_IF_LIST=($(/sbin/route  | egrep "^default" | awk '{ print $NF }'))
+    # IPv6 doesn't show :x nics
+    if [ -z "${NET_IF}" ] ; then
+        NET_IF_LIST=("eth0")
+    fi
+}
+
+setNetIfCentOs(){
+
+    NET_IF_LIST=($(/sbin/route | awk 'BEGIN{n=3}NR<=n{next}1 {print $8}' | sort -u))
+}
+
+NETSIM=0
+OP=""
+
+while getopts  "m:l:vgcsrn" flag
+do
+    case "$flag" in
+        m) OSS_MASTER_CFG="$OPTARG";;
+        n) NETSIM=1;;
+        s) OP="-s";;
+        c) OP="-c";;
+        r) OP="-r";;
+        v) OP="-ver";;
+        g) OP="-report";;
+        l) SERVERS="$OPTARG";;
+        *) printUsage
+            exit 1;;
+    esac
+done
+
+if [ ${NETSIM} -eq 0 ] ; then
+    if [ -z "${OSS_MASTER_CFG}" ] && [ -z "${SERVERS}" ]; then
+        printUsage
+        exit
+    fi
+fi
+
+if [ -z "${OP}" ]  ; then
+    echo "ERROR: No operation specified, you must use one of -s,-c or -r"
+    printUsage
+    exit
+fi
+
+node_ip_list=""
+
+if [ ${NETSIM} -eq 0 ] ; then
+    if [ -z "${SERVERS}" ] ; then
+        . ${OSS_MASTER_CFG} > /dev/null 2>&1
+    fi
+
+    ARGS="${OP}"
+
+    for SERVER in ${SERVERS} ; do
+        echo "${SERVER}"
+
+        if [ "${OP}" = "-s" ] ; then
+            echo shroot | su root -c "/netsim_users/pms/bin/limitbw -n ${ARGS}"
+        else
+            LOG=/netsim_users/pms/logs/limitbw.log
+            echo shroot | su root -c "/netsim_users/pms/bin/limitbw -n ${ARGS} >  ${LOG} 2>&1"
+            echo shroot | su root -c "tail --lines=100 ${LOG} | grep -i ERROR > /dev/null"
+            if [ $? -eq 0 ] ; then
+                echo "ERROR: Failed for ${SERVER}"
+                echo shroot | su root -c "tail --lines=100 ${LOG} | grep -i ERROR"
+                exit 1
+            fi
+        fi
+    done
+else
+    . /netsim/netsim_cfg > /dev/null 2>&1
+
+    if [ -r /usr/sbin/ethtool ] ; then
+        ETHTOOL=/usr/sbin/ethtool
+    elif [ -r /sbin/ethtool ] ; then
+        ETHTOOL=/sbin/ethtool
+    else
+        echo "ERROR: Cannot file ethtool"
+        exit 1
+    fi
+
+    IPTABLES=/usr/sbin/iptables
+    IP6TABLES=/usr/sbin/ip6tables
+
+    # Need to figure out which interface to use
+    NET_IF_LIST=()
+    # Checking OS distribution name as a part of short term solution
+    os_release_file_list=($(ls /etc/*-release))
+    if [[ ${#os_release_file_list[*]} != 0 ]];then
+        # Checking if OS is CentOS
+        cat /etc/*-release | grep -i 'centos' > /dev/null
+        if [[ $? == 0 ]];then
+            setNetIfCentOs   # for vm with suse and other os
+        else
+            setNetIfSuseOs   # for vm other than with CentOS
+        fi
+    else
+        echo "WARNING : OS release files not found. Proceeding with default SUSE setup for Bandwidth limit"
+        setNetIfSuseOs       # for vm other than with CentOS
+    fi
+    echo "INFO : Available NICs ${NET_IF_LIST[*]}"
+
+    if [ ${OP} = "-s" ] ; then
+        showTrafficControls
+    elif [ ${OP} = "-c" ] ; then
+        removeTrafficControls
+        applyTrafficControls
+    elif [ ${OP} = "-r" ] ; then
+        removeTrafficControls
+    elif [ ${OP} = "-ver" ] ; then
+        showScriptVersion
+    elif [ ${OP} = "-report" ] ; then
+        generateTrafficControlsReport
+    fi
+fi

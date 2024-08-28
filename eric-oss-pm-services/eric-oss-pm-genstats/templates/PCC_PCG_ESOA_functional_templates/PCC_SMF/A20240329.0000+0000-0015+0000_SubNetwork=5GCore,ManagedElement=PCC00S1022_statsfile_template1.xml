@@ -1,0 +1,52 @@
+<?xml version='1.0' encoding='utf-8'?>
+<?xml-stylesheet type="text/xsl" href="MeasDataCollection.xsl"?>
+<measCollecFile xmlns="http://www.3gpp.org/ftp/specs/archive/32_series/32.435#measCollec">
+<fileHeader dnPrefix="" fileFormatVersion="32.435 V11.0" vendorName="Ericsson">
+<fileSender localDn="PCC00S1022" elementType="PCC" />
+<measCollec beginTime="2024-03-29T00:00:00+00:00"/>
+</fileHeader>
+<measData>
+<managedElement userLabel="PCC00S1022" localDn="PCC00S1022" swVersion="1.17" />
+<measInfo measInfoId="smf-session-management-n1-snssai-apn">
+<job jobId="pc-sm-all-job" />
+<granPeriod duration="PT900S" endTime="2024-03-29T00:15:00+00:00" />
+<repPeriod duration="PT900S"/>
+<measType p="1">establishment-acc</measType>
+<measType p="3">establishment-req</measType>
+<measType p="7">smf-modification-cmd</measType>
+<measType p="18">smf-modification-cmpl</measType>
+<measValue measObjLdn="/epg:epg/pgw/ns[name=1-000005]/apn[name=dnnA.ericsson.se]">
+<r p="1">200</r>
+<r p="3">220</r>
+<r p="7">40</r>
+<r p="18">20</r>
+</measValue> 
+</measInfo>
+<measInfo measInfoId="smf-nsmf-pdu-session-snssai-apn">
+<job jobId="pc-sm-all-job" />
+<granPeriod duration="PT900S" endTime="2024-03-29T00:15:00+00:00" />
+<repPeriod duration="PT900S"/>
+<measType p="3">create-sm-context-req</measType>
+<measType p="4">create-sm-context-resp-succ</measType>
+<measType p="7">release-sm-context-req</measType>
+<measType p="8">release-sm-context-resp-succ</measType>
+<measType p="11">sm-context-status-notify-req</measType>
+<measType p="12">sm-context-status-notify-req-fail-comm</measType>
+<measType p="21">update-sm-context-req</measType>
+<measType p="22">update-sm-context-resp-succ</measType>
+<measValue measObjLdn="/epg:epg/pgw/ns[name=1-000005]/apn[name=dnnA.ericsson.se]">
+<r p="3">200</r>
+<r p="4">198</r>
+<r p="7">60</r>
+<r p="8">58</r>
+<r p="11">40</r>
+<r p="12">38</r>
+<r p="21">20</r>
+<r p="22">18</r>
+</measValue>
+</measInfo>
+</measData>
+<fileFooter>
+<measCollec endTime="2024-03-29T00:15:00+00:00" />
+</fileFooter>
+</measCollecFile>

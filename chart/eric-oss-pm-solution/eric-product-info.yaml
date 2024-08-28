@@ -1,0 +1,16 @@
+productName: "RESTSim PM Solution"
+productNumber: "CXP00000"
+images:
+  pm:
+    productName: "RESTSim PM Image"
+    productNumber: "CXP00000"
+    registry: "armdocker.rnd.ericsson.se"
+    repoPath: "REPO_PATH"
+    name: "eric-oss-pm-solution"
+    tag: "VERSION"
+  logging-utility:
+    productName: "PM Logging Utility"
+    registry: "armdocker.rnd.ericsson.se"
+    repoPath: "proj_oss_releases/enm"
+    name: "pm_logging_utility"
+    tag: "v9"

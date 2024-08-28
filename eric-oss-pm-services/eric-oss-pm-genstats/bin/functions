@@ -1,0 +1,409 @@
+################################################################################
+# COPYRIGHT Ericsson 2018
+#
+# The copyright to the computer program(s) herein is the property of
+# Ericsson Inc. The programs may be used and/or copied only with written
+# permission from Ericsson Inc. or in accordance with the terms and
+# conditions stipulated in the agreement/contract under which the
+# program(s) have been supplied.
+################################################################################
+
+###################################################
+# Version no    :  NSS 21.07
+# Purpose       :  A placeholder for all the common functions used across Genstats scripts
+# Jira No       :  NSS-33908
+# Gerrit Link   :  https://gerrit.ericsson.se/#/c/9028868/
+# Description   :  Adding support for SCU-21-Q1-V1
+# Date          :  05/02/2021
+# Last Modified :  vadim.malakhovski@ericsson.com
+####################################################
+
+getRncType() {
+
+    MY_RNC=$1
+    MY_SERVER=$2
+
+    MY_TYPE="C"
+
+    RNC_TYPE=$(eval "echo \$$(echo ${MY_RNC}_type)")
+    if [ ! -z "${RNC_TYPE}" ] ; then
+        MY_TYPE=${RNC_TYPE}
+    elif [ ! -z "${RNC_TYPE_RANGE_LIST}" ] ; then
+        RNC_NUM=`echo ${MY_RNC} | sed 's/^RNC//'`
+        for RNC_TYPE_RANGE in ${RNC_TYPE_RANGE_LIST} ; do
+            RNC_TYPE=`echo ${RNC_TYPE_RANGE} | awk -F: '{print $1}'`
+            RNC_MIN=`echo ${RNC_TYPE_RANGE} | awk -F: '{print $2}'`
+            RNC_MAX=`echo ${RNC_TYPE_RANGE} | awk -F: '{print $3}'`
+            if [ ${RNC_NUM} -ge ${RNC_MIN} ] && [ ${RNC_NUM} -le ${RNC_MAX} ] ; then
+                MY_TYPE=${RNC_TYPE}
+                break
+            fi
+       done
+    fi
+
+    echo "${MY_TYPE}"
+}
+
+getSimNVer() {
+
+    MY_SIM=$1
+    MY_N_VER="N"
+
+    MY_SIM_N_VER=$(eval "echo \$$(echo ${MY_SIM}_mimtype)")
+    if [ ! -z "${MY_SIM_N_VER}" ] ; then
+        MY_N_VER=${MY_SIM_N_VER}
+    fi
+
+    echo "${MY_N_VER}"
+}
+
+
+removeControlMCharacter(){
+    inputSampleFile=$1
+
+    sed -i 's/\r//g' ${inputSampleFile}
+}
+
+
+getDateTimeInEpoch(){
+    # This method takes date with hour value as an input argument and return epoch time of it in seconds. e.g -> 20180305.09 = to epoch seconds.
+    input_date_time=${1}
+
+    date_extracter=$(echo ${input_date_time} | cut -d'.' -f1)
+    hour_extracter=$(echo ${input_date_time} | cut -d'.' -f2)
+    hour_extracter=$(echo ${hour_extracter} | sed 's/^0*//')
+    if [[ -z $hour_extracter ]]; then
+       hour_extracter="0"
+    fi
+    date_sec=$(date --date="${date_extracter}" +%s)
+    hour_sec=$((${hour_extracter}*3600))
+    total_epoch=$((${date_sec}+${hour_sec}))
+
+    echo ${total_epoch}
+    return
+}
+
+getSimType() {
+
+    MY_SIM=$1
+    
+    SIM_TYPE_FILE='/netsim/genstats/tmp/sim_info.txt'
+    GSM_SIM_INFO_FILE="/netsim/genstats/tmp/bsc_msc_sim_info.txt"
+    TYPE=""
+
+    echo ${MY_SIM} | egrep "MSC|BSC|HLR" > /dev/null
+    if [[ $? -eq 0 ]]; then
+        GSM_TYPE=$(cat ${GSM_SIM_INFO_FILE} | grep ${MY_SIM} | head -1 | cut -d'|' -f4)
+        if [[ -z ${GSM_TYPE} ]]; then
+            echo "UNKNOWN"
+        else
+            echo ${GSM_TYPE}
+        fi
+        return
+    fi
+	
+    echo ${MY_SIM} | egrep "ERSN|ERS[-_]SN[-_]ESC|ERS[-_]SN[_-]SCU|SCU[-_]" > /dev/null
+    if [[ $? -eq 0 ]]; then
+        echo "ESC"
+        return
+    fi
+	
+    if [[ ! -f ${SIM_TYPE_FILE} ]]; then
+        echo "UNKNOWN"
+        return
+    fi
+
+    TYPE=$(cat ${SIM_TYPE_FILE} | grep "${MY_SIM}:")
+    
+    if [[ -z ${TYPE} ]]; then
+        echo "UNKNOWN"
+        return
+    else
+        TYPE=$(echo ${TYPE} | awk -F':' '{print $2}' | sed 's/ //g')
+        echo "${TYPE}"
+        return
+    fi   
+}
+
+getRncRelease() {
+
+    MY_MIM_VER=$1
+    MY_RNC_P_VER=$(eval "echo \$$(echo ${MY_MIM_VER}_RNC_P_VER)")
+
+    if [ -z "${MY_RNC_P_VER}" ] ; then
+        echo "ERROR: ${MY_MIM_VER}_RNC_P_VER is not defined" 1>&2
+        exit 1
+    fi
+
+    echo "${MY_RNC_P_VER}"
+}
+
+getGpeh2Xml() {
+
+    MY_MIM_VER=$1
+    MY_RNC_P_VER=`getRncRelease ${MY_MIM_VER}`
+    if [ $? -ne 0 ] ; then
+        exit 1
+    fi
+
+    echo "/opt/ericsson/eba_rnctools/bin/gpeh2xml-${MY_RNC_P_VER}"
+}
+
+getXml2Gpeh() {
+
+    MY_MIM_VER=$1
+
+    MY_RNC_P_VER=`getRncRelease ${MY_MIM_VER}`
+    if [ $? -ne 0 ] ; then
+        exit 1
+    fi
+    echo "/opt/ericsson/eba_rnctools/bin/xml2gpeh-${MY_RNC_P_VER}"
+}
+
+getSimListForServer() {
+    SERVER=$1
+    echo ${LIST}
+}
+
+
+getMMESimListForServer() {
+    SERVER=$1
+    echo ${MME_SIM_LIST}
+}
+
+log() {
+
+    MSG=$1
+
+    TS=`date +"%Y-%m-%d %H:%M:%S"`
+    echo "${TS} ${MSG}"
+}
+
+
+getRemoteNeMIM() {
+
+    local SERVER=$1
+    local SIM=$2
+    local NE_TYPE=$3
+    local IS_GRAN_SIM=$4
+
+    if [ "${IS_GRAN_SIM}" != "YES" ] ; then
+        IS_GRAN_SIM="NO"
+    fi
+
+    #MIM_VER=$(rsh -l netsim ${SERVER} /netsim_users/pms/bin/get_mim_ver --sim ${SIM} --netype ${NE_TYPE} --isgransim ${IS_GRAN_SIM})
+    MIM_VER=$(/netsim_users/pms/bin/get_mim_ver --sim ${SIM} --netype ${NE_TYPE} --isgransim ${IS_GRAN_SIM})
+    if [ $? -ne 0 ] ; then
+        echo "ERROR: Failed to get MIM ver for ${NE_TYPE} in ${SIM} on ${SERVER}"
+        return 1
+    fi
+
+    echo "${MIM_VER}" | egrep '^ERROR:' > /dev/null
+    if [ $? -eq 0 ] ; then
+        echo "ERROR: Failed to get MIM ver for ${NE_TYPE} in ${SIM} on ${SERVER}, get_mim_ver error"
+        return 1
+    fi
+
+    echo "${MIM_VER}"
+}
+
+getMPConfig() {
+
+    MY_RNC=$1
+
+    if [ -z "${GPEH_MP_CONFIG_LIST}" ] ; then
+        echo "GPEH_MP_CONFIG_LIST not set"
+        return 1
+    fi
+
+    MY_CONFIG=""
+    RNC_NUM=`echo ${MY_RNC} | sed 's/^RNC//'`
+    for RNC_MP_CONFIG in ${GPEH_MP_CONFIG_LIST} ; do
+        RNC_MIN=`echo ${RNC_MP_CONFIG} | awk -F: '{print $1}'`
+        RNC_MAX=`echo ${RNC_MP_CONFIG} | awk -F: '{print $2}'`
+        CFG=`echo ${RNC_MP_CONFIG} | awk -F: '{print $3}'`
+        if [ ${RNC_NUM} -ge ${RNC_MIN} ] && [ ${RNC_NUM} -le ${RNC_MAX} ] ; then
+            MY_CONFIG=${CFG}
+            break
+        fi
+    done
+
+    if [ -z "${MY_CONFIG}" ] ; then
+        return 1
+    fi
+
+    echo "${MY_CONFIG}"
+    return 0
+}
+
+
+
+
+getGpehCellsPerMP() {
+
+    MY_RNC=$1
+
+    if [ -z "${GPEH_CELLS_PER_MP_CONFIG_LIST}" ] ; then
+        echo "GPEH_CELLS_PER_MP_CONFIG_LIST not set"
+        return 1
+    fi
+
+    MY_CELL_PER_MP=""
+    RNC_NUM=`echo ${MY_RNC} | sed 's/^RNC//'`
+    for GPEH_CELLS_CONFIG in ${GPEH_CELLS_PER_MP_CONFIG_LIST} ; do
+        RNC_MIN=`echo ${GPEH_CELLS_CONFIG} | awk -F: '{print $1}'`
+        RNC_MAX=`echo ${GPEH_CELLS_CONFIG} | awk -F: '{print $2}'`
+        CELL_PER_MP=`echo ${GPEH_CELLS_CONFIG} | awk -F: '{print $3}'`
+        if [ ${RNC_NUM} -ge ${RNC_MIN} ] && [ ${RNC_NUM} -le ${RNC_MAX} ] ; then
+            MY_CELL_PER_MP=${CELL_PER_MP}
+            break
+        fi
+    done
+
+    if [ -z "${MY_CELL_PER_MP}" ] ; then
+        return 1
+    fi
+
+    echo "${MY_CELL_PER_MP}"
+    return 0
+
+}
+
+
+getNumSubFiles() {
+
+    local RNC=$1
+    local NUM_CELLS=$2
+
+    #Get the GPEH Cells per MP for the given RNC
+    MY_GPEH_CELLS_PER_MP=$(getGpehCellsPerMP ${RNC})
+    if [ $? -ne 0 ] ; then
+        echo "${MY_GPEH_CELLS_PER_MP}"
+        return 1
+    fi
+
+    # Note
+    local MP_CONFIG
+    MP_CONFIG=$(getMPConfig ${RNC})
+    if [ $? -ne 0 ] ; then
+        echo "${MP_CONFIG}"
+        return 1
+    fi
+
+    local MAX_SUB_FILES=`echo ${MP_CONFIG} | awk -F, '{print $1}'`
+    local MP_PER_FILE=`echo ${MP_CONFIG} | awk -F, '{print $2}'`
+
+    local NUM_MPs=`expr ${NUM_CELLS} / ${MY_GPEH_CELLS_PER_MP}`
+    local NUM_SUB_FILES=`expr ${NUM_MPs} / ${MP_PER_FILE}`
+    if [ ${NUM_SUB_FILES} -gt ${MAX_SUB_FILES} ] ; then
+        NUM_SUB_FILES=${MAX_SUB_FILES}
+    fi
+
+    echo ${NUM_SUB_FILES}
+}
+
+
+checkPMDIR() {
+
+    if [ -z "${PMDIR}" ] ; then
+        log "ERROR: PMDIR not set"
+        return 1
+    fi
+
+    # If it's a simple path
+    if [ -d "${PMDIR}" ] ; then
+        return 0
+    fi
+
+    # Okay doesn't exist, now maybe its an NFS reference
+    echo "${PMDIR}" | egrep '^[^ :]*:/.*' > /dev/null
+    if [ $? -ne 0 ] ; then
+        # Not NFS so the referenced dir doesnt exist
+        return 1
+    fi
+
+    #
+    # NFS reference
+    #
+    HOST=$(echo ${PMDIR} | awk -F: '{print $1}')
+    DIR=$(echo ${PMDIR} | awk -F: '{print $2}')
+
+    PMDIR=$(printf "/net/%s%s" ${HOST} ${DIR})
+    # Check that it exists
+    if [ ! -d ${PMDIR} ] ; then
+        return 1
+    fi
+    return 0
+
+    # THIS_HOST_OS=$(uname)
+    # if [ ${THIS_HOST_OS} = "SunOS" ] ; then
+    # else
+    # 	# No automout
+    # 	PMDIR=/tmp/pmdir_mnt
+    # 	# Check if already mounted
+    # 	if [ -d ${PMDIR}/xml_templates ] ; then
+    # 	    return 0
+    # 	fi
+
+    # 	# Try and mount
+    # 	if [ ! -d ${PMDIR} ] ; then
+    # 	    mkdir ${PMDIR}
+    # 	fi
+
+    # 	mount ${HOST}:${DIR} ${PMDIR}
+    # 	if [ $? -ne 0 ] ; then
+    # 	    return 1
+    # 	fi
+    # fi
+}
+
+
+
+
+#Get ROP Intervals supported for a NE Type
+getStatsRopIntervalSupportedForNodeType() {
+
+    NE_TYPE=$1
+    ROP_PERIOD_LIST=""
+    for STATS_WORKLOAD in $STATS_WORKLOAD_LIST; do
+         ROP_PERIOD=`echo ${STATS_WORKLOAD} | awk -F: '{print $1}'`
+         NE_TYPES=`echo ${STATS_WORKLOAD} | awk -F: '{print $2}'`
+         if [ ${NE_TYPES} = "ALL" ] ; then
+
+             ROP_PERIOD_LIST="${ROP_PERIOD_LIST} ${ROP_PERIOD}"
+         else
+             NE_TYPES=$(echo $NE_TYPES | sed 's/,/ /g')
+             echo ${NE_TYPES} | grep -w -i ${NE_TYPE} > /dev/null
+             if [ $? -eq 0 ] ; then
+                  ROP_PERIOD_LIST="${ROP_PERIOD_LIST} ${ROP_PERIOD}"
+             fi
+         fi
+    done
+    echo "${ROP_PERIOD_LIST}"
+}
+
+# Create Links for OSS Simulator
+linkFiles(){
+    source=$1
+	target=$2
+    ln -s $source $target &
+    rc=$?
+    if [ $rc -ne 0 ] ; then
+        if [ $rc -eq 2 ] ; then
+            echo "INFO: File exists: $target"
+        else
+            echo "ERROR: Failed to link $target"
+        fi
+    fi
+}
+
+copySourceTemplates(){
+
+SOURCE_TEMPLATE=$1
+TEMPLATE=$2
+
+echo "Copying $1 to $2"
+cp ${SOURCE_TEMPLATE} ${TEMPLATE}
+
+}
+

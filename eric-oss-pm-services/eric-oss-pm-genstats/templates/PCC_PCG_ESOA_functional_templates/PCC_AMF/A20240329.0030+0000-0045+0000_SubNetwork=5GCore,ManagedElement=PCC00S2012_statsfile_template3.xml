@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='utf-8'?>
+<measCollecFile xmlns="http://www.3gpp.org/ftp/specs/archive/32_series/32.435#measCollec">
+        <fileHeader dnPrefix="" fileFormatVersion="32.435 V11.0" vendorName="Ericsson">
+                <fileSender localDn="PCC00S2012" elementType="PCC" />
+               <measCollec beginTime="2024-03-29T00:30:00+00:00" />
+        </fileHeader>
+        <measData>
+                <managedElement userLabel="PCC00S2012" localDn="PCC00S2012" swVersion="1.20" />
+                <measInfo measInfoId="AMF_Mobility_NetworkSlice">
+                        <job jobId="slice-assurance-amf" />
+                        <granPeriod duration="PT900S" endTime="2024-03-29T00:45:00+00:00" />
+                        <repPeriod duration="PT900S" />
+                        <measType p="1">VS.NS.NbrRegisteredSub.5GS</measType>
+                        <measValue measObjLdn="/system/mm/network-slice[snssai=3-9]">
+                                <r p="1">13</r>
+                        </measValue>
+                        <measValue measObjLdn="/system/mm/network-slice[snssai=5-83]">
+                                <r p="1">87</r>
+                        </measValue>
+                </measInfo>
+        </measData>
+        <fileFooter>
+                <measCollec endTime="2024-03-29T00:45:00+00:00" />
+        </fileFooter>
+</measCollecFile>

@@ -1,0 +1,100 @@
+<?xml version='1.0' encoding='utf-8'?>
+<?xml-stylesheet type="text/xsl" href="MeasDataCollection.xsl"?>
+<measCollecFile xmlns="http://www.3gpp.org/ftp/specs/archive/32_series/32.435#measCollec">
+<fileHeader dnPrefix="" fileFormatVersion="32.435 V11.0" vendorName="Ericsson">
+<fileSender localDn="PCG00S2033" elementType="PCG" />
+<measCollec beginTime="2024-03-29T00:30:00+00:00" />
+</fileHeader>
+<measData>
+<managedElement userLabel="PCG00S2033" localDn="PCG00S2033" swVersion="1.17" />
+<measInfo measInfoId="up-payload-dnn-slice">
+<job jobId="slice-assurance-upf"/>
+<granPeriod duration="PT900S" endTime="2024-03-29T00:45:00+00:00" />
+<repPeriod duration="PT900S" />
+<measType p="1">ul-ipv4-received-bytes</measType>
+<measType p="2">dl-ipv4-received-bytes</measType>
+<measType p="3">ul-ipv6-received-bytes</measType>
+<measType p="4">dl-ipv6-received-bytes</measType>
+<measType p="5">ul-ipv4-drop-packets</measType>
+<measType p="6">dl-ipv4-drop-packets</measType>
+<measType p="7">ul-ipv6-drop-packets</measType>
+<measType p="8">dl-ipv6-drop-packets</measType>
+<measType p="9">ul-unstr-drop-packets</measType>
+<measType p="10">dl-unstr-drop-packets</measType>
+<measType p="11">ul-unstr-received-bytes</measType>
+<measType p="12">dl-unstr-received-bytes</measType> 
+<measValue measObjLdn="/pcupe:user-plane/pcupdnn:dnns/pcupdnn:dnn[name=dnnB.ericsson.se]/pcupdnn:slices/pcupdnn:slice[name=3-000009]">
+<r p="1">10800</r>
+<r p="2">21600</r>
+<r p="3">32400</r>
+<r p="4">64800</r>
+<r p="5">540</r>
+<r p="6">216</r>
+<r p="7">324</r>
+<r p="8">648</r>
+<r p="9">108</r>
+<r p="10">216</r>
+<r p="11">324</r>
+<r p="12">648</r>
+</measValue>
+<measValue measObjLdn="/pcupe:user-plane/pcupdnn:dnns/pcupdnn:dnn[name=dnnC.ericsson.se]/pcupdnn:slices/pcupdnn:slice[name=3-000009]">
+<r p="1">32400</r>
+<r p="2">64800</r>
+<r p="3">97200</r>
+<r p="4">194400</r>
+<r p="5">1620</r>
+<r p="6">648</r>
+<r p="7">972</r>
+<r p="8">1944</r>
+<r p="9">324</r>
+<r p="10">648</r>
+<r p="11">972</r>
+<r p="12">1944</r>
+</measValue>
+<measValue measObjLdn="/pcupe:user-plane/pcupdnn:dnns/pcupdnn:dnn[name=dnnB.ericsson.se]/pcupdnn:slices/pcupdnn:slice[name=5-000053]">
+<r p="1">54000</r>
+<r p="2">108000</r>
+<r p="3">162000</r>
+<r p="4">324000</r>
+<r p="5">2700</r>
+<r p="6">1080</r>
+<r p="7">1620</r>
+<r p="8">3240</r>
+<r p="9">540</r>
+<r p="10">1080</r>
+<r p="11">1620</r>
+<r p="12">3240</r>
+</measValue>
+</measInfo>
+<measInfo measInfoId="up-pfcp-procedure-dnn-slice">
+<job jobId="slice-assurance-upf"/>
+<granPeriod duration="PT900S" endTime="2024-03-29T00:45:00+00:00" />
+<repPeriod duration="PT900S"/>
+<measType p="1">session-establishment-req-rcvd</measType>
+<measType p="2">session-establishment-rsp-rej-sent</measType>
+<measType p="3">session-modification-req-rcvd</measType> 
+<measType p="4">session-modification-rsp-rej-sent</measType>
+<measValue measObjLdn="/pcupe:up/dnn[name=dnnB.ericsson.se]/slice[name=3-000009]">
+<r p="1">400</r>
+<r p="2">40</r>
+<r p="3">800</r>
+<r p="4">80</r>
+</measValue>
+<measValue measObjLdn="/pcupe:up/dnn[name=dnnC.ericsson.se]/slice[name=3-000009]">
+<r p="1">3600</r>
+<r p="2">360</r>
+<r p="3">7200</r>
+<r p="4">720</r>
+</measValue>
+<measValue measObjLdn="/pcupe:up/dnn[name=dnnB.ericsson.se]/slice[name=5-000053]">
+<r p="1">298800</r>
+<r p="2">29880</r>
+<r p="3">597600</r>
+<r p="4">59760</r>
+</measValue>
+</measInfo>
+</measData>
+<fileFooter>
+<measCollec endTime="2024-03-29T00:45:00+00:00" />
+</fileFooter>
+</measCollecFile>

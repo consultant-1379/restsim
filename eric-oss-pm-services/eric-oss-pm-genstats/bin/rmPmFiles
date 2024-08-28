@@ -1,0 +1,72 @@
+#!/bin/bash
+
+XML_RETENTION=1
+BIN_RETENTION=1
+STEP_DIR="/pms_tmpfs/xml_step/"
+
+if [ -r /netsim/netsim_cfg ] ; then
+    . /netsim/netsim_cfg > /dev/null 2>&1
+fi
+
+. /netsim_users/pms/bin/functions
+
+# Rentention in hours
+
+while getopts  "x:b:" flag
+do
+    case "$flag" in
+        x) XML_RETENTION="$OPTARG";;
+        b) BIN_RETENTION="$OPTARG";;
+
+        *) printf "Usage: %s [-x XML_RETENTION in hours] [-b BIN_RETENTION in hours]" $0
+           exit 1;;
+    esac
+done
+
+XML_RETENTION_MIN=`expr $XML_RETENTION \* 60`
+BIN_RETENTION_MIN=`expr $BIN_RETENTION \* 60`
+
+
+OUT_ROOT="/ericsson/pmic"
+REQUEST_DIR="/netsim_users/pms/config"
+
+#DB Removal
+#Need to remove the last hours worth of data from the DB.
+python /netsim_users/pms/bin/crud_operator.py -d '/tmp/rm.json'
+
+log "INFO : Checking ${OUT_ROOT} for deletion..."
+for pm_type in `ls ${OUT_ROOT}`; do
+    dir_list=""
+    if [[ ${pm_type} == "FUTURE" ]]; then
+            dir_list=$(find ${OUT_ROOT}/${pm_type} -type d -mmin +180 | grep "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_")
+        else
+            dir_list=$(find ${OUT_ROOT}/${pm_type} -type d -mmin +${XML_RETENTION_MIN} | grep "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_")
+        fi
+        deletion_count=$(echo $dir_list | wc -w)
+        log "INFO : Deleting ${deletion_count} directory from ${pm_type}..."
+        for i in $dir_list; do
+            rm -rf $i > /dev/null 2>&1
+        done
+        log "INFO : Deleted ${deletion_count} directory from ${pm_type}."
+done
+
+log "INFO : Checking ${REQUEST_DIR} for deletion..."
+for config_dir in `ls ${REQUEST_DIR}`; do
+    dir_list=""
+    if [[ ${config_dir} == "json" ]] || [[ ${config_dir} == "requests" ]] || [[ ${config_dir} == "touch_files" ]]; then
+            dir_list=$(find ${REQUEST_DIR}/${config_dir} -type f -mmin +60)
+        else
+            continue
+        fi
+        deletion_count=$(echo $dir_list | wc -w)
+        log "INFO : Deleting ${deletion_count} directory from ${config_dir}..."
+        for i in $dir_list; do
+            rm -f $i > /dev/null 2>&1
+        done
+        log "INFO : Deleted ${deletion_count} directory from ${config_dir}."
+done
+
+#Handling .tmp files removal in step directory.
+log "INFO: Deleting files directory from ${STEP_DIR}..."
+find ${STEP_DIR}/* -name '*.tmp' -mmin +60 -exec rm {} \; > /dev/null 2>&1
+log "INFO : Deleted Files directory from ${STEP_DIR}."

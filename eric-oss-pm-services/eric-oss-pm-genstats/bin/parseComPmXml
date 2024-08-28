@@ -1,0 +1,251 @@
+#!/usr/bin/env perl
+
+use Getopt::Long;
+use Data::Dumper;
+use strict;
+
+main();
+
+my $DEBUG = 0;
+
+sub main
+{
+    my ($xmlFile,$resultFile,$printTotals);
+    my $result = GetOptions(
+			    "xml=s"   => \$xmlFile,
+			    "totals" => \$printTotals,
+			    "debug=s" => \$DEBUG
+			    );
+    ($result == 1 ) or die "Invalid args";
+
+    my %cntrInfo = ();
+    parseFile($xmlFile,\%cntrInfo);
+
+  
+    if ( $printTotals )
+    {
+	my $totalCntrs = 0;
+
+	printf ("%15s %15s %15s %10s %10s %s\n", "Sim Cntr/MO", "PDF Cntr/MO", "PDF Val/MO", "#MO", "Total Cntr", "MO Type");
+	for my $moType ( sort keys %cntrInfo )
+	{
+	    my $r_moCntrInfo = $cntrInfo{$moType}->{'cntrs'};
+
+	    my $simpleCntr = 0;
+	    my $pdfCntr = 0;
+	    my $pdfTotal = 0;
+	    foreach my $cntrName ( keys %{$r_moCntrInfo} )
+	    {
+		if ( $r_moCntrInfo->{$cntrName} == 1 )
+		{
+		    $simpleCntr++;
+		}
+		else
+		{
+		    $pdfCntr++;
+		    $pdfTotal += $r_moCntrInfo->{$cntrName};
+		}
+	    }
+
+	    
+	    my $cntrPerMo = $simpleCntr + $pdfTotal;
+	    my $cntrPerMoType = $cntrPerMo * $cntrInfo{$moType}->{'inst'};
+
+	    printf("%15s %15s %15s %10s %10s %s\n", $simpleCntr, $pdfCntr, $pdfTotal, $cntrInfo{$moType}->{'inst'}, $cntrPerMoType, $moType);
+	    $totalCntrs += $cntrPerMoType;
+	}
+
+	print "Total = $totalCntrs\n";
+    }
+
+}
+
+
+sub getCntrList
+{
+    my ($r_lines, $r_CntrList) = @_;
+    my $line;
+
+    foreach $line (@{$r_lines})
+    {
+	if ( $line =~/<r p\=\"(.*)\"/)
+        {
+			my ($cntrName) = $1;
+                    
+                	push @{$r_CntrList},$cntrName;
+                 	if ( $DEBUG > 6 ) { print "getCntrList: found counter $cntrName\n" };
+
+	}
+    }
+
+    if ( $DEBUG > 5 ) { print Dumper("getCntrList: end of counter list r_CntrList", $r_CntrList); }
+}
+
+sub getMoList
+{
+    my ($r_lines, $r_MoList,$r_pdfCount) = @_;
+
+    my $line;
+    my $autoId = 1;
+    while ( ($line = shift @{$r_lines}) && ($line !~ /<\/measValue>/ ) )
+    {
+	
+
+           my ($mo) = $line =~/<measValue measObjLdn\=\"(.*)\"/;
+
+            if ( $mo =~ /=$/ ) {
+               print "WARN: Invalid FDN $mo, auto-assigning id auto_" . $autoId . "\n";
+               $mo .= "auto_" . $autoId;
+               $autoId++;
+            }
+	    if ( $DEBUG > 6 ) { print "getMoList: found mo $mo\n" };
+
+	    push @{$r_MoList}, $mo;
+
+
+
+	    # For the first MO figure out which counters are PDF counters
+	    if ( $#{$r_MoList} == 0 )
+	    {
+		my $rIndex = 0;
+		while ( ($line = shift @{$r_lines}) && ($line =~ /<r .*>/) )
+		{
+		    my ($cntrStr) = $line =~ /<r .*>(.*)<\/r>/;
+		    my @cntrs = split(/,/, $cntrStr);
+		    if ( $#cntrs != 0 )
+		    {
+			$r_pdfCount->{$rIndex} = $#cntrs + 1;
+		    }
+
+		    $rIndex++;
+		}
+	    }
+	
+    }
+	    
+    if ( $DEBUG > 5 ) { print Dumper("getMoList: r_MoList", $r_MoList); }
+    if ( $DEBUG > 5 ) { print Dumper("getMoList: r_pdfCount", $r_pdfCount); }
+}
+
+
+
+sub parseFile 
+{
+
+   my ($xmlFile,$r_cntrInfo) = @_;
+
+   my %allMos = ();
+
+   my %cntrByMoType = ();
+  
+   open XML, $xmlFile or die "Cannot open $xmlFile";
+  
+   while ( my $line = getLine() )
+    {
+         
+	if ( $line =~ /\<measValue.*\>/ )
+	{	
+                  
+           my @lines = ();
+           push @lines, $line;
+	   while ( ($line = getLine()) && ($line !~ /<\/measValue>/ ) )
+   	   {
+	      push @lines, $line;
+	   } 
+      
+         
+           my @moList = ();
+	   my @counterList = ();
+	   my %pdfCount = ();
+
+           getCntrList(\@lines, \@counterList, );
+	   getMoList(\@lines, \@moList,\%pdfCount);
+
+	  if ( $#moList > -1 )
+	    {
+		foreach my $mo ( @moList )
+		{
+		    $allMos{$mo}++;
+		}
+		
+                my @rdns = split(",", $moList[0]);
+                my ($moType,$moId) = split( "=", $rdns[$#rdns]);
+		if ( $DEBUG > 7 ) { print "parseFile: moType=$moType moList[0]=$moList[0]\n"; }
+
+		if ( (! defined $moType) || ($moType eq "") )
+		{
+		    print "ERROR: Cannot extract moType from $moList[0]";
+		}
+
+		for ( my $i = 0; $i <= $#counterList; $i++ )
+		{
+		    if ( ! exists $cntrByMoType{$moType}->{$counterList[$i]} )
+		    {
+			if ( exists $pdfCount{$i} )
+			{
+			    $cntrByMoType{$moType}->{$counterList[$i]} = $pdfCount{$i};
+			}
+			else
+			{
+			    $cntrByMoType{$moType}->{$counterList[$i]} = 1;
+			}
+		    }
+		}
+
+		if ( $DEBUG > 7 ) { print Dumper("parseFile: cntrByMoType for $moType", $cntrByMoType{$moType}); }
+	    }
+        }
+
+     }
+
+     my @moList = sort keys %allMos;
+    if ( $DEBUG > 4 ) { print Dumper("parseFile: moList", \@moList); }
+    if ( $DEBUG > 4 ) { print Dumper("parseFile: cntrByMoType", \%cntrByMoType); }
+
+    foreach my $mo ( keys %allMos )
+    {
+        my @rdns = split(",", $mo);
+        my ($moType,$moId) = split( "=", $rdns[$#rdns]);
+	if ( (! defined $moType) || ($moType eq "") )
+	{
+	    print "ERROR: Cannot extract moType from $mo\n";
+	}
+	else
+	{
+	    $r_cntrInfo->{$moType}->{'inst'}++;
+	}
+    }
+    foreach my $moType ( keys %{$r_cntrInfo} )
+    {
+	my $r_cntrList = $cntrByMoType{$moType};
+	$r_cntrInfo->{$moType}->{'cntrs'} = $r_cntrList;
+    }
+
+    if ( $DEBUG > 2 ) { print Dumper("parseFile: r_cntrInfo", $r_cntrInfo); }
+
+}
+
+
+		
+sub skipLines
+{    
+    my ($skipCount) = @_;
+    if ( $DEBUG > 7 ) { print "skipLines: skipCount=$skipCount\n"; } 
+
+    for ( my $i = 0; $i < $skipCount; $i++ )
+    {
+	getLine();
+    }
+
+    if ( $DEBUG > 7 ) { print "skipLines: done\n"; } 
+}
+	    
+sub getLine
+{
+ 
+    my $line = <XML>;
+    if ( $DEBUG > 8 ) { print "getLine: $line"; }
+    return $line;
+}
+
+

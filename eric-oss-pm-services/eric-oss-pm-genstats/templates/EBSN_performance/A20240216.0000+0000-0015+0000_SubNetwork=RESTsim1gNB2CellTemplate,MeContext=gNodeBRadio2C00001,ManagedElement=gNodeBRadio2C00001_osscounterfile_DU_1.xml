@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="MeasDataCollection.xsl"?>									
+<measCollecFile xmlns="http://www.3gpp.org/ftp/specs/archive/32_series/32.435#measCollec">									
+    <fileHeader fileFormatVersion="32.435 V10.0" vendorName="Ericsson AB">									
+        <fileSender localDn="SubNetwork=RESTsim1gNB2CellTemplate,MeContext=gNodeBRadio2C00001,ManagedElement=gNodeBRadio2C00001" elementType="OSS"/>									
+        <measCollec beginTime="2024-02-16T00:00:00+00:00"/>									
+    </fileHeader>									
+    <measData>									
+        <managedElement localDn="SubNetwork=RESTsim1gNB2CellTemplate,MeContext=gNodeBRadio2C00001,ManagedElement=gNodeBRadio2C00001" userLabel="gNodeBRadio2C00001" swVersion="CXP2020013/15_R37A02"/>									
+        <measInfo>									
+            <granPeriod duration="PT900S" endTime="2024-02-16T00:15:00+00:00"/>									
+            <repPeriod duration="PT900S"/>									
+            <measType p="1">pmEbsMacLatTimeDlDrxSyncQos</measType>									
+            <measType p="2">pmEbsMacLatTimeDlDrxSyncSampQos</measType>									
+            <measType p="3">pmEbsMacLatTimeDlNoDrxSyncQos</measType>									
+            <measType p="4">pmEbsMacLatTimeDlNoDrxSyncSampQos</measType>									
+            <measType p="5">pmEbsnMacTimeDlDrbQos_mcc100mnc101_sst1sd1</measType>									
+            <measType p="6">pmEbsnMacTimeDlDrbQos_mcc100mnc101_sst1sd3</measType>									
+            <measType p="7">pmEbsnMacTimeUlResUe_mcc100mnc101_sst1sd1</measType>									
+            <measType p="8">pmEbsnMacTimeUlResUe_mcc100mnc101_sst1sd3</measType>									
+            <measType p="9">pmEbsnMacVolDlDrbQos_mcc100mnc101_sst1sd1</measType>									
+            <measType p="10">pmEbsnMacVolDlDrbQos_mcc100mnc101_sst1sd3</measType>									
+            <measType p="11">pmEbsnMacVolUlResUe_mcc100mnc101_sst1sd1</measType>									
+            <measType p="12">pmEbsnMacVolUlResUe_mcc100mnc101_sst1sd3</measType>									
+            <measType p="13">pmEbsnRlcDelayPktTransmitDlQos_mcc100mnc101_sst1sd1</measType>									
+            <measType p="14">pmEbsnRlcDelayPktTransmitDlQos_mcc100mnc101_sst1sd3</measType>									
+            <measType p="15">pmEbsnRlcDelayTimeDlQos_mcc100mnc101_sst1sd1</measType>									
+            <measType p="16">pmEbsnRlcDelayTimeDlQos_mcc100mnc101_sst1sd3</measType>									
+            <measValue measObjLdn="ManagedElement=gNodeBRadio2C00001,GNBDUFunction=1,NRCellDU=gNodeBRadio2C00001-1">									
+                <r p="1">2,5,485,6,669</r>									
+                <r p="2">2,5,482,6,292</r>									
+                <r p="3">2,5,909,6,625</r>									
+                <r p="4">2,5,797,6,246</r>									
+                <r p="5">2,5,956,6,421</r>									
+                <r p="6">2,5,486,6,335</r>									
+                <r p="7">858</r>									
+                <r p="8">723</r>									
+                <r p="9">2,5,905,6,959</r>									
+                <r p="10">2,5,305,6,818</r>									
+                <r p="11">492</r>									
+                <r p="12">307</r>									
+                <r p="13">2,5,730,6,254</r>									
+                <r p="14">2,5,693,6,403</r>									
+                <r p="15">2,5,170,6,944</r>									
+                <r p="16">2,5,431,6,927</r>									
+            </measValue>									
+            <measValue measObjLdn="ManagedElement=gNodeBRadio2C00001,GNBDUFunction=1,NRCellDU=gNodeBRadio2C00001-2">									
+                <r p="1">2,5,349,6,380</r>									
+                <r p="2">2,5,609,6,924</r>									
+                <r p="3">2,5,631,6,737</r>									
+                <r p="4">2,5,644,6,963</r>									
+                <r p="5">2,5,335,6,431</r>									
+                <r p="6">2,5,992,6,370</r>									
+                <r p="7">437</r>									
+                <r p="8">196</r>									
+                <r p="9">2,5,8,6,413</r>									
+                <r p="10">2,5,412,6,358</r>									
+                <r p="11">334</r>									
+                <r p="12">34</r>									
+                <r p="13">2,5,448,6,494</r>									
+                <r p="14">2,5,586,6,505</r>									
+                <r p="15">2,5,502,6,339</r>									
+                <r p="16">2,5,490,6,419</r>									
+            </measValue>									
+        </measInfo>									
+    </measData>									
+    <fileFooter>									
+        <measCollec endTime="2024-02-16T00:15:00+00:00"/>									
+    </fileFooter>
+</measCollecFile>	    							

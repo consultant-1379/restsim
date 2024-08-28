@@ -1,0 +1,178 @@
+#!/bin/bash
+
+ROOT_DIR=`dirname $0`
+. ${ROOT_DIR}/functions
+
+getRncMimVer()
+{
+    MY_RNC=$1
+
+    cat ${TMP_DIR}/mim_ver.txt | nawk -v rnc=${MY_RNC} '{if ($1 == rnc ) {print $2} }' | sed 's/\./_/g'
+}
+
+getFFV()
+{
+    MY_MIM_VER=$1
+
+    MY_RNC_FMT_VER=$(eval "echo \$$(echo ${MY_MIM_VER}_RNC_FMT_VER)")
+    if [ -z "${MY_RNC_FMT_VER}" ] ; then
+	exit 1
+    fi
+
+    # Hack here! Can't figure out how to make the above line retain the 
+    # space at the start of the FMT_VER, so we'll include an extra
+    # space in the echo below
+    echo " ${MY_RNC_FMT_VER}"
+}
+
+printUsage()
+{
+    cat <<EOF
+Usage: makeOtherGpeh -i Input dir with GPEH bin -g oss.cfg  -e eventList 
+
+where
+ Input dir
+   The directory containing the binary GPEH files called <MIM_VER>.bin, e.g. J.bin, H.bin
+
+ ossCfg
+   The cfg file to use. This is used to determine the what version of the ebs_rnctools 
+   to use for each MIM version
+
+ eventList
+   Specifies the list of events (Normal the EBSW and WNCS ones) to exclude from the generated file. 
+   Format is 
+      event-type=event-count
+
+EOF
+}
+
+TMP_ROOT=/tmp
+KEEP_TMP=0
+
+while getopts  "t:i:o:e:g:k" flag
+do
+    case "$flag" in
+	i) IN_DIR="$OPTARG";;
+	e) REMOVE_EVENTS_FILE="$OPTARG";;
+	t) TMP_ROOT="$OPTARG";;
+	g) OSS_MASTER_CFG="$OPTARG";;
+	k) KEEP_TMP=1;;
+
+	*) printUsage
+           exit 1;;
+    esac
+done
+
+if [ -z "${IN_DIR}" ] || [ -z "${REMOVE_EVENTS_FILE}" ] || [ -z "${OSS_MASTER_CFG}" ] ; then
+    printUsage
+    exit 1
+fi
+
+if [ -r ${OSS_MASTER_CFG} ] ; then
+    . ${OSS_MASTER_CFG} > /dev/null 2>&1
+else
+    echo "ERROR: Cannot file OSS cfg file ${OSS_MASTER_CFG}"
+    exit 1
+fi
+
+checkPMDIR
+if [ $? -ne 0 ] ; then
+    log "ERROR: PMDIR not set correctly"
+    exit 1
+else
+    OUT_DIR=${PMDIR}/gpeh_templates
+fi
+
+if [ ! -d "${TMP_ROOT}" ] ; then
+    echo "ERROR: tmp directory \"${TMP_ROOT}\" does not exist"
+    printUsage
+    exit 1
+fi
+
+TMP_DIR=${TMP_ROOT}/makeother
+if [ ! -d ${TMP_DIR} ] ; then
+    mkdir ${TMP_DIR}
+fi
+
+CELL_LIST=${TMP_DIR}/ucid.txt
+if [ ! -r ${TMP_DIR}/mim_ver.txt ] ; then
+    log "Get MIM Versions"
+    /opt/ericsson/nms_cif_cs/etc/unsupported/bin/cstest -s Seg_masterservice_CS lt MeContext -f '$.neMIMName==RNC_NODE_MODEL' -an neMIMversion | \
+	awk '{if ( $1 ~ /^Sub/ ) { rnc=$1 } else if ( $2 ~ /^neMIMversion/ ) { print rnc, $6; } }' | \
+	sed 's/^[^ ]*MeContext=//' | sed 's/"v//' | sed 's/"//g' > ${TMP_DIR}/mim_ver.txt
+    
+    log "Get Cell IDs"
+    /opt/ericsson/nms_cif_cs/etc/unsupported/bin/cstest -s Seg_masterservice_CS lt UtranCell -an cId > ${CELL_LIST}
+fi
+
+RNC_LIST=`cat ${TMP_DIR}/mim_ver.txt | awk '{print $1}' | sort -n`
+SRC_FILES=""
+#
+# Before we do any real work, lets try and make we that we have all the files required
+#
+for RNC in ${RNC_LIST} ; do
+    #
+    # Check that the RNC has cells
+    #
+    NUM_CELLS=`grep -c "MeContext=${RNC}," ${CELL_LIST} | awk '{print $1}'`
+    if [ ${NUM_CELLS} -eq 0 ] ; then
+	continue
+    fi
+
+    RNC_MIM_VER=`getRncMimVer $RNC`
+    if [ ! -r ${IN_DIR}/${RNC_MIM_VER}.bin ] ; then
+	echo "Could not find ${IN_DIR}/${RNC_MIM_VER}.bin for ${RNC}"
+	exit 1
+    fi
+
+    FFV=`getFFV ${RNC_MIM_VER}`
+    if [ -z "${FFV}" ] ; then
+	log "ERROR: Cannot get FFV for ${RNC_MIM_VER} for ${RNC}"
+	exit 1
+    fi
+
+    echo "${SRC_FILES}" | grep ${RNC_MIM_VER}.bin > /dev/null
+    if [ $? -ne 0 ] ; then
+	SRC_FILES="${SRC_FILES} ${RNC_MIM_VER}.bin"
+    fi
+done
+
+
+RNC_EVENTS_DEF_FILE=`ls /opt/ericsson/eba_rnctools/pylib/gpehgenlib/def/RncEventDefs* | tail -1`
+EVENT_NAMES=`cat ${REMOVE_EVENTS_FILE} | grep = | awk -F= '{print $1}'`
+EVENT_ID_STR=""
+for EVENT_NAME in ${EVENT_NAMES} ; do
+    if [ ! -z "${EVENT_ID_STR}" ] ; then
+	EVENT_ID_STR="${EVENT_ID_STR},"
+    fi
+
+    SEARCH_NAME=`echo ${EVENT_NAME} | tr "[:lower:]" "[:upper:]" | sed 's/-/_/g'`
+    EVENT_ID=`grep -w  ${SEARCH_NAME} ${RNC_EVENTS_DEF_FILE} | sed "s/.* id='//" | sed "s/'>$//"`
+    if [ -z "${EVENT_ID}" ] ; then
+	echo "ERROR: Failed to get id for ${EVENT_NAME}"
+	break
+    fi
+
+    EVENT_ID_STR="${EVENT_ID_STR}${EVENT_ID}"
+done
+
+for SRC_FILE in ${SRC_FILES} ; do
+    MIM_VER=`echo ${SRC_FILE} | sed 's/\.bin//'`
+    FFV=`getFFV ${RNC_MIM_VER}`
+
+    log "Filtering ${MIM_VER} GPEH"
+    ${ROOT_DIR}/makeGpeh --input ${IN_DIR}/${SRC_FILE} --out ${TMP_DIR}/${MIM_VER}_gpeh_sub.bin --filter exclude \
+	--events ${EVENT_ID_STR} --fmt "${FFV}"
+    if [ $? -ne 0 ] ; then
+	echo "ERROR: Failed to filter ${IN_DIR}/${MIM_VER}.bin"
+	exit 1
+    fi
+done
+
+`cd ${TMP_DIR} ; tar cf - *_gpeh_sub.bin | gzip > ${OUT_DIR}/Other_templates.tar.gz`
+    
+if [ -d ${TMP_DIR} ] && [ ${KEEP_TMP} -eq 0 ] ; then
+    rm -rf ${TMP_DIR}
+fi
+
+

@@ -1,0 +1,3660 @@
+#!/bin/bash
+
+################################################################################
+# COPYRIGHT Ericsson 2021
+#
+# The copyright to the computer program(s) herein is the property of
+# Ericsson Inc. The programs may be used and/or copied only with written
+# permission from Ericsson Inc. or in accordance with the terms and
+# conditions stipulated in the agreement/contract under which the
+# program(s) have been supplied.
+################################################################################
+
+####################################################
+# Version no    :  NSS 22.02
+# Purpose       :  Script is responsible for STATS file generation for all Nodes types supported by PMS
+# Jira No       :  NSS-38624
+# Gerrit Link   :  https://gerrit.ericsson.se/#/c/11716183/
+# Description   :  Added 12hr rop DST switch support to the CCDM/PCG Nodes
+# Date          :  09/02/2021
+# Last Modified :  surendra.mattaparthi@tcs.com
+####################################################
+
+#This Script is responsible for STATS file generation for all Nodes types supported by PMS
+#This scripts is periodically executed by cron process as part of crontab entry
+
+#Template stepping is a process to generate temporary templates i.e /pms_tmpfs/xml_step/<Node type>_counters_<MIM version>_<ROP end time>_step.xml file
+#by updating the counters values based on the counter types defined in /netsim_users/pms/xml_templates/<ROP interval>/<Node type>_counters_<MIM version>.cntrprop
+# file from the previous ROP stepped template file i.e from /pms_tmpfs/xml_step/<Node type>_counters_<MIM version>_<Previous ROP end time>_step.xml.
+#If the previous ROP stepped template file is not present the it uses the template file i.e /netsim_users/pms/xml_templates/<ROP interval>/<Node type>_counters_<MIM version>.xml.
+#Note: Values of counters in template files are by default 0.
+
+umask 000
+
+removeTempFile() {
+    SIM=$1
+    TEMP_FILE_LIST=`ls ${CC_DIR} | grep ${SIM}`
+    for FILE in ${TEMP_FILE_LIST};do
+        rm -rf ${CC_DIR}/${FILE}
+    done
+}
+
+createOutputDir() {
+    #param1=OUTDIR
+    OUTDIR=$1
+    SIM=$2
+    NETSIM_BIN_DIR="/netsim_users/pms/bin"
+    if [ ! -d ${OUTDIR} ] ; then
+        for SERVER in $SERVERS ; do
+            log "INFO: skipping createTempFsMountForNodes.sh"
+            #/usr/bin/rsh -l root ${SERVER} ${NETSIM_BIN_DIR}/createTempFsMountForNodes.sh
+            #echo shroot | su root -c "${NETSIM_BIN_DIR}/createTempFsMountForNodes.sh"
+            if [ $? -ne 0 ] ; then
+                log "ERROR: createTempFsMountForNodes.sh failed"
+                removeTempFile ${SIM}
+                exit 1
+            fi
+        done
+    fi
+}
+
+
+handle_uploaded_time_sync_config_for_pcc_pcg(){
+        if [[ -f ${PCC_PCG_CONFIG_TOUCH_FILE} ]]; then
+                log "INFO : New file upload acknowledged."
+                log "INFO : Setting up directory structures..."
+                rm -f ${PCC_PCG_CONFIG_TOUCH_FILE}
+                rm -rf ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp
+                if [[ ! -d ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp ]]; then
+            mkdir -p ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp
+        fi
+                log "INFO : Directory structures has been set."
+                file_to_unpack=$(ls ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/ | grep "tar.gz" | awk -F"." '{print $1}')
+                if [[ $? -eq 0 ]]; then
+            log "INFO : Decompressing ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/${file_to_unpack}.tar.gz to ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp/"
+            mv ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/${file_to_unpack}.tar.gz ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp/
+            gzip -t ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp/${file_to_unpack}.tar.gz > /dev/null 2>&1
+            if [[ $? -eq 0 ]]; then
+                gunzip -q ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp/${file_to_unpack}.tar.gz
+                tar -xf ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp/${file_to_unpack}.tar -C ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp/ > /dev/null 2>&1
+                if [[ $? -eq 0 ]]; then
+                    rm -f ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp/${file_to_unpack}.tar
+                    log "INFO : Decompression completed."
+                    template_directory=$(ls ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp/ | head -1)
+                                        for pcc_pcg_config_file in `ls ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp/${template_directory}`; do
+                                                cat ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp/${template_directory}/${pcc_pcg_config_file} > /netsim_users/pms/etc/${pcc_pcg_config_file}
+                                        done
+                                        log "INFO : PCC/PCG Config data switch successfully."
+                else
+                    log "WARNING : Invalid .tar templates given. Skipping config file switching."
+                fi
+            else
+                log "WARNING : Invalid .gz templates given. Skipping config file switching."
+            fi
+        else
+            log "WARNING : No files found with .tar.gz format, skipping config file switching."
+        fi
+                rm -rf ${PCC_PCG_CONFIG_DOWNLOADED_DATA}/temp
+        fi
+}
+handle_uploaded_pcc_cpg_templates(){
+        if [[ -f ${PCC_PCG_TEMPLATE_TOUCH_FILE} ]]; then
+                log "INFO : New file upload acknowledged."
+                log "INFO : Setting up directory structures..."
+                rm -f ${PCC_PCG_TEMPLATE_TOUCH_FILE}
+                rm -rf ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp
+                if [[ ! -d ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp ]]; then
+            mkdir -p ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp
+        fi
+                log "INFO : Directory structures has been set."
+                file_to_unpack=$(ls ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/ | grep "tar.gz" | awk -F"." '{print $1}')
+                if [[ $? -eq 0 ]]; then
+            log "INFO : Decompressing ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/${file_to_unpack}.tar.gz to ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/"
+            mv ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/${file_to_unpack}.tar.gz ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/
+            gzip -t ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/${file_to_unpack}.tar.gz > /dev/null 2>&1
+            if [[ $? -eq 0 ]]; then
+                gunzip -q ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/${file_to_unpack}.tar.gz
+                tar -xf ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/${file_to_unpack}.tar -C ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/ > /dev/null 2>&1
+                if [[ $? -eq 0 ]]; then
+                    rm -f ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/${file_to_unpack}.tar
+                    log "INFO : Decompression completed."
+                    template_directory=$(ls ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/ | head -1)
+                                        for five_g_core_dir in `echo PCC_AMF PCC_SMF PCG_UPF`; do
+                                                if [[ -d "${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/${template_directory}/${five_g_core_dir}" ]]; then
+                                                        ls ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/${template_directory}/${five_g_core_dir} | grep ".xml.gz" > /dev/null
+                                                        if [[ $? -eq 0 ]]; then
+                                                                log "INFO : Decompressing counter files in dir ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/${template_directory}/${five_g_core_dir} ..."
+                                                                gunzip ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/${template_directory}/${five_g_core_dir}/* > /dev/null 2>&1
+                                                                if [[ $? -eq 0 ]]; then
+                                                                        log "INFO : Decompression of counter files completed."
+                                                                        log "INFO : Switching source templates with new uploaded templates."
+								        rm -f /netsim_users/pms/xml_templates/PCC_PCG_ESOA/${five_g_core_dir}/*
+                                                                        cp ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/${template_directory}/${five_g_core_dir}/* /netsim_users/pms/xml_templates/PCC_PCG_ESOA/${five_g_core_dir}/
+                                                                        log "INFO : Template switching completed for ${five_g_core_dir}"
+                                                                        if [[ ${PCC_PCG_FOR_ESOA_PERFORMANCE} == "false" ]]; then
+                                                                          log "WARNING : Deleting old network configuration for PCC/PCG Functional mode..."
+                                                                          rm -rf /ericsson/pmic/STATS/*PCC* > /dev/null 2>&1
+                                                                          rm -rf /ericsson/pmic/STATS/*PCG* > /dev/null 2>&1
+                                                                          log "INFO : Old network configuration for PCC/PCG Functional mode has been deleted."
+                                                                        fi
+                                                                else
+                                                                        log "WARNING : Unable to decompress files in folder ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/${template_directory}/${five_g_core_dir}. Skipping template switching for ${five_g_core_dir}"
+                                                                fi
+                                                        else
+                                                                 log "WARNING : No .xml.gz file found inside ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/${template_directory}/${five_g_core_dir}. Skipping Templates switching for ${five_g_core_dir}"
+                                                        fi
+                        else
+                            log "WARNING : No directory found with name ${five_g_core_dir} inside ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp/. Skipping Template switching for ${five_g_core_dir}"
+                        fi
+                                        done
+                else
+                    log "WARNING : Invalid .tar templates given. Skipping template switching."
+                fi
+            else
+                log "WARNING : Invalid .gz templates given. Skipping template switching."
+            fi
+        else
+            log "WARNING : No files found with .tar.gz format, skipping template switching."
+        fi
+                rm -rf ${PCC_PCG_TEMPLATE_DOWNLOADED_DATA}/temp
+        fi
+}
+
+handle_uploaded_ebsn_templates(){
+        if [[ -f ${EBSN_TEMPLATE_TOUCH_FILE} ]]; then
+                log "INFO : New file upload acknowledged."
+        log "INFO : Setting up directory structures..."
+        rm -f ${EBSN_TEMPLATE_TOUCH_FILE}
+        rm -rf ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp
+        if [[ ! -d ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp ]]; then
+            mkdir -p ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp
+        fi
+                log "INFO : Directory structures has been set."
+        file_to_unpack=$(ls ${EBSN_TEMPLATE_DOWNLOADED_DATA}/ | grep "tar.gz" | awk -F"." '{print $1}')
+                if [[ $? -eq 0 ]]; then
+            log "INFO : Decompressing ${EBSN_TEMPLATE_DOWNLOADED_DATA}/${file_to_unpack}.tar.gz to ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp/"
+            mv ${EBSN_TEMPLATE_DOWNLOADED_DATA}/${file_to_unpack}.tar.gz ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp/
+            gzip -t ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp/${file_to_unpack}.tar.gz > /dev/null 2>&1
+            if [[ $? -eq 0 ]]; then
+                gunzip -q ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp/${file_to_unpack}.tar.gz
+                tar -xf ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp/${file_to_unpack}.tar -C ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp/ > /dev/null 2>&1
+                if [[ $? -eq 0 ]]; then
+                    rm -f ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp/${file_to_unpack}.tar
+                    log "INFO : Decompression completed."
+                    template_directory=$(ls ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp/ | head -1)
+                    ls ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp/${template_directory}/ | grep ".xml.gz" > /dev/null
+                    if [[ $? -eq 0 ]]; then
+                        log "INFO : Decompressing counter files..."
+                        gunzip ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp/${template_directory}/* > /dev/null 2>&1
+                        if [[ $? -eq 0 ]]; then
+                            log "INFO : Decompression of counter files completed."
+                            if [[ ${EBSN_PERFORMANCE_ENABLED} == "true" ]]; then
+                                ${EBSN_TEMPLATE_MAPPER} "${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp/${template_directory}/"
+                                if [[ $? -eq 0 ]]; then
+                                    log "INFO : Switching source templates with new uploaded templates."
+                                    for NF in ${ENABLED_STATIC_REPLAY}; do
+                                        rm -rf /netsim_users/pms/xml_templates/replay/${NF}/*
+                                        cp ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp/${template_directory}/*${NF}* /netsim_users/pms/xml_templates/replay/${NF}/
+                                    done
+                                    log "INFO : Template switching completed."
+                                else
+                                    log "WARNING : Issue while mapping source templates. Skipping template switching."
+                                fi
+                            else
+                                log "INFO : Switching source templates with new uploaded templates."
+                                for NF in ${ENABLED_STATIC_REPLAY}; do
+                                    rm -rf /netsim_users/pms/xml_templates/replay/${NF}/*
+                                    cp ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp/${template_directory}/*${NF}* /netsim_users/pms/xml_templates/replay/${NF}/
+                                done
+                                log "INFO : Template switching completed."
+                            fi
+                        else
+                            log "WARNING : Issue while decompressing uploaded .xml.gz files. Skipping template switching."
+                        fi
+                    else
+                        log "WARNING : Not able to find .xml.gz files. Skipping template switching."
+                    fi
+                else
+                    log "WARNING : Invalid .tar templates given. Skipping template switching."
+                fi
+            else
+                log "WARNING : Invalid .gz templates given. Skipping template switching."
+            fi
+        else
+            log "WARNING : No files found with .tar.gz format, skipping template switching."
+        fi
+        rm -rf ${EBSN_TEMPLATE_DOWNLOADED_DATA}/temp
+    fi
+}
+
+handle_uploaded_ebsn_csv_file(){
+    if [[ -f ${EBSN_CSV_TOUCH_FILE} ]] && [[ ${EBSN_PERFORMANCE_ENABLED} == "false" ]]; then
+        log "INFO : New CSV file upload acknowledged."
+        rm -f ${EBSN_CSV_TOUCH_FILE}
+        if [[ $? -eq 0 ]]; then
+            log "INFO : Latest .csv upload request has been deleted."
+            log "INFO : Searching ${EBSN_CSV_DOWNLOADED_DATA}/ebsn_replay_counter_info.csv file..."
+            if [[ -f ${EBSN_CSV_DOWNLOADED_DATA}/ebsn_replay_counter_info.csv ]]; then
+                log "INFO : File ${EBSN_CSV_DOWNLOADED_DATA}/ebsn_replay_counter_info.csv found."
+                log "INFO : Calling csv to json conversion module."
+                ${CSV_TO_JSON_CONVERTER} "EBSN_REPLAY" "${EBSN_CSV_DOWNLOADED_DATA}/ebsn_replay_counter_info.csv"
+                if [[ $? -eq 0 ]]; then
+                    log "INFO : Conversion of .csv to json successful..."
+                    if [[ -f "${EBSN_MAPPING_JSON}_bkp" ]]; then
+                        log "INFO : Temporary file ${EBSN_MAPPING_JSON}_bkp found."
+                        log "INFO : Deleting old .json mapping file..."
+                        rm -f ${EBSN_MAPPING_JSON} > /dev/null 2>&1
+                        if [[ $? -eq 0 ]]; then
+                            log "INFO : Old file ${EBSN_MAPPING_JSON} deleted."
+                            log "INFO : Renaming file ${EBSN_MAPPING_JSON}_bkp to ${EBSN_MAPPING_JSON}"
+                            mv ${EBSN_MAPPING_JSON}_bkp ${EBSN_MAPPING_JSON}
+                            log "INFO : File name ${EBSN_MAPPING_JSON}_bkp renamed to ${EBSN_MAPPING_JSON}. Switching of counter mapping json successful."
+                        else
+                            log "WARNING : Issue while deleting old ${EBSN_MAPPING_JSON} file. Skipping further operation."
+                        fi
+                    else
+                        log "WARNING : Not able to find ${EBSN_MAPPING_JSON}_bkp file. Something went wrong. Skipping switching operation."
+                    fi
+                else
+                    log "WARNING : Conversion of .csv to .json unsuccessful. Skipping operation of switching counter mapping files. "
+                fi
+                rm -f ${EBSN_MAPPING_JSON}_bkp > /dev/null 2>&1
+            else
+                log "WARNING : Unable to find ${EBSN_CSV_DOWNLOADED_DATA}/ebsn_replay_counter_info.csv file. Something went wrong. Skipping new mapping generation."
+            fi
+        else
+            log "WARNING : Unable to delete recent .csv upload request. Skipping further operation."
+        fi
+    fi
+}
+
+
+
+
+updateOssParams() {
+
+    NETYPE=$1
+    SIM_NAME=$2
+    _MANAGED_ELEMENT_ID_=$3
+    COMPRESSION=${NETYPE}_FILECOMPRESSION
+    FILE_COMP_NEEDED=${!COMPRESSION}
+    if [[ ${FILE_COMP_NEEDED} == "YES" ]] || [[ ${NETYPE} == *"EPG"* ]]; then
+        EXTENSION=".xml.gz"
+    else
+        EXTENSION=".xml"
+    fi
+    FDN=${NETYPE}_FDN_OSS
+    FILE_PATH=${NETYPE}_REALFILE_PATH
+    #For Timezone fetching
+    if [[ ${NETYPE} == *"EPG"* ]]; then
+        NETYPE=`echo ${NETYPE} | cut -d'_' -f1`
+    fi
+
+    if [[ "${BULK_OSS_PM}" == "True" && "${NETYPE}" != "SGSN" ]]; then
+        if [ ! -z "${NETYPE_TZ}" ]; then
+            TIMEZONE=${NETYPE_TZ}
+        else
+            TIMEZONE=${UTC_TIMEZONE}
+        fi
+           ROP_LOCAL_OFFSET_BULK_OSS=$(TZ="${TIMEZONE}" date "+%z")
+           ROP_START_DATE_BULK_OSS=$(TZ="${TIMEZONE}" date --date 'TZ="UTC"'${OSS_START_TIME:0:8} "+%Y%m%d")
+           ROP_START_TIME_BULK_OSS=$(TZ="${TIMEZONE}" date --date 'TZ="UTC"'${OSS_START_TIME:8:4} "+%H%M")
+           ROP_END_TIME_BULK_OSS=$(TZ="${TIMEZONE}" date --date 'TZ="UTC"'${OSS_END_TIME:8:4} "+%H%M")
+           NE_FILENAME="A${ROP_START_DATE_BULK_OSS}.${ROP_START_TIME_BULK_OSS}${ROP_LOCAL_OFFSET_BULK_OSS}-${ROP_END_TIME_BULK_OSS}${ROP_LOCAL_OFFSET_BULK_OSS}_${!FDN}${_MANAGED_ELEMENT_ID_}_statsfile${EXTENSION}"
+
+    elif [ "${NETYPE}" = "SAPC" ] ; then
+           NE_FILENAME="${ECIM_FILENAME_PREFIX}_${!FDN}${_MANAGED_ELEMENT_ID_}_statsfile${EXTENSION}"
+    else
+        NE_FILENAME=`generateFileName ${NETYPE} ${_MANAGED_ELEMENT_ID_} ${EXTENSION} ${!FDN}`
+    fi
+
+    if [ "${NETYPE}" = "SGSN" ]; then
+        NE_FILENAME="A${MME_ROP_START_DATE_LOCAL}.${MME_ROP_START_TIME_LOCAL}${MME_ROP_LOCAL_START_OFFSET}-${MME_ROP_END_DATE_LOCAL}.${MME_ROP_END_TIME_LOCAL}${MME_ROP_LOCAL_END_OFFSET}_${!FDN}${_MANAGED_ELEMENT_ID_}_statsfile${EXTENSION}"
+    fi
+
+    OUTPUTFILE="${!FILE_PATH}/${NE_FILENAME}"
+    SIM=${SIM_NAME//-/_}
+    LINK_DIR_PATH=${SIM}_LINK_DIR_OSS
+    REAL_LINK_PATH=${SIM}_REAL_FILE_OSS
+
+}
+
+generateFileName() {
+    NETYPE=$1
+    MANAGED_ELEMENT_ID=$2
+    XML_EXTENSION=$3
+    OSS_SUBNETWORK=$4
+    TIMEZONE=""
+    FILENAME=""
+
+    CCDM_TYPE_DST_NODES="PCC PCG SHARED_CNF SC_UDM"
+    LOCAL_DST_NODES="PCC PCG SHARED_CNF"
+    if [[ "${NETYPE}" == "5GRADIONODE" ]]; then
+        NETYPE_TZ=$(eval echo '$'FIVEGRADIONODE_TZ)
+    else
+        NETYPE_TZ=$(eval echo '$'${NETYPE}_TZ)
+    fi
+
+    if [ ! -z "${NETYPE_TZ}" ] ; then
+        TIMEZONE=${NETYPE_TZ}
+    else
+        TIMEZONE=${UTC_TIMEZONE}
+    fi
+
+    echo ${LOCAL_DST_NODES} | grep -w ${NETYPE} >> /dev/null
+    if [[ $? -eq 0 ]];then
+        ROP_START_DATE=$(date -d @${start_epoch} +'%Y%m%d')
+        ROP_START_TIME=$(date -d @${start_epoch} +'%H%M')
+        ROP_START_LOCAL_OFFSET_THIS=$(date -d @${start_epoch} +'%z')
+        ROP_END_TIME=$(date -d @${end_epoch} +'%H%M')
+        ROP_END_LOCAL_OFFSET_THIS=$(date -d @${end_epoch} +'%z')
+        CCDM_TYPE_ROP_START_TIME_LOCAL=$(date -d @${start_epoch} +'%H%M')
+        CCDM_TYPE_ROP_END_TIME_LOCAL=$(date -d @${end_epoch} +'%H%M')
+        CCDM_TYPE_ROP_START_OFFSET=$(date -d @${start_epoch} +'%z')
+    else
+        ROP_START_DATE=$(TZ=${TIMEZONE} date -d @${start_epoch} +'%Y%m%d')
+        ROP_START_TIME=$(TZ=${TIMEZONE} date -d @${start_epoch} +'%H%M')
+        ROP_START_LOCAL_OFFSET_THIS=$(TZ=${TIMEZONE} date -d @${start_epoch} +'%z')
+        ROP_END_TIME=$(TZ=${TIMEZONE} date -d @${end_epoch} +'%H%M')
+        ROP_END_LOCAL_OFFSET_THIS=$(TZ=${TIMEZONE} date -d @${end_epoch} +'%z')
+        CCDM_TYPE_ROP_START_TIME_LOCAL=$(TZ=${TIMEZONE} date -d @${start_epoch} +'%H%M')
+        CCDM_TYPE_ROP_END_TIME_LOCAL=$(TZ=${TIMEZONE} date -d @${end_epoch} +'%H%M')
+        CCDM_TYPE_ROP_START_OFFSET=$(TZ=${TIMEZONE} date -d @${start_epoch} +'%z')
+    fi
+    if [[ ${ROP_START_LOCAL_OFFSET_THIS} != ${ROP_END_LOCAL_OFFSET_THIS} ]];then
+         UTC_START_TIME=$(date -u -d @${start_epoch} +'%H%M')
+         UTC_END_TIME=$(date -u -d @${end_epoch} +'%H%M')
+         OFFSET_TYPE=$(echo ${ROP_END_LOCAL_OFFSET_THIS} | cut -c 1)
+         OFFSET_HOUR=$(echo ${ROP_END_LOCAL_OFFSET_THIS} | cut -c 2,3)
+         OFFSET_MIN=$(echo ${ROP_END_LOCAL_OFFSET_THIS} | cut -c 4,5)
+         START_OFFSET_HOUR=$(echo ${ROP_START_LOCAL_OFFSET_THIS} | cut -c 2,3)
+         START_OFFSET_MIN=$(echo ${ROP_START_LOCAL_OFFSET_THIS} | cut -c 4,5)
+         if [[ ${OFFSET_TYPE} == "+" ]];then
+            CCDM_TYPE_ROP_START_TIME_LOCAL=$(date -u -d "${UTC_START_TIME} +${OFFSET_HOUR} hour $OFFSET_MIN minutes " +"%H%M")
+            CCDM_TYPE_ROP_END_TIME_LOCAL=$(date -u -d "${UTC_END_TIME} +${START_OFFSET_HOUR} hour $START_OFFSET_MIN minutes " +"%H%M")
+         else
+            CCDM_TYPE_ROP_START_TIME_LOCAL=$(date -u -d "${UTC_START_TIME} -${OFFSET_HOUR} hour $OFFSET_MIN minutes " +"%H%M")
+            CCDM_TYPE_ROP_END_TIME_LOCAL=$(date -u -d "${UTC_END_TIME} -${START_OFFSET_HOUR} hour $START_OFFSET_MIN minutes " +"%H%M")
+         fi
+         CCDM_TYPE_ROP_START_OFFSET=${ROP_END_LOCAL_OFFSET_THIS}
+    fi
+    flag=0
+    echo ${CCDM_TYPE_DST_NODES} | grep -w ${NETYPE} >> /dev/null
+    if [[ $? -eq 0 ]];then
+        flag=1
+        if [[ ${ROP_PERIOD_MIN} == 1440 || ${ROP_PERIOD_MIN} == 720 ]];then
+           ROP_END_TIME=$CCDM_TYPE_ROP_END_TIME_LOCAL
+        else
+           ROP_START_TIME=$CCDM_TYPE_ROP_START_TIME_LOCAL
+        fi
+        ROP_START_LOCAL_OFFSET_THIS=$CCDM_TYPE_ROP_START_OFFSET
+    fi
+
+    if [[ "${OSS_enabled}" = "True" ]]; then
+
+        if [ ! -z "${NETYPE_TZ}" ] ; then
+            FILENAME="A${ROP_START_DATE}.${ROP_START_TIME}${ROP_START_LOCAL_OFFSET_THIS}-${ROP_END_TIME}${ROP_END_LOCAL_OFFSET_THIS}_${OSS_SUBNETWORK}${MANAGED_ELEMENT_ID}_statsfile${XML_EXTENSION}"
+        else
+            FILENAME="A${ROP_START_DATE}.${ROP_START_TIME}-${ROP_END_TIME}_${OSS_SUBNETWORK}${MANAGED_ELEMENT_ID}_statsfile${XML_EXTENSION}"
+        fi
+    else
+        if [ ! -z "${NETYPE_TZ}" ] || [ "${flag}" = "1" ]; then
+            FILENAME="A${ROP_START_DATE}.${ROP_START_TIME}${ROP_START_LOCAL_OFFSET_THIS}-${ROP_END_TIME}${ROP_END_LOCAL_OFFSET_THIS}_${MANAGED_ELEMENT_ID}${XML_EXTENSION}"
+        else
+            FILENAME="A${ROP_START_DATE}.${ROP_START_TIME}-${ROP_END_TIME}_${MANAGED_ELEMENT_ID}${XML_EXTENSION}"
+        fi
+    fi
+
+    echo  ${FILENAME}
+}
+
+stepCounters() {
+    TEMPLATE=$1
+    PREV_TIME=$2
+    THIS_TIME=$3
+    MY_SIM_NAME=$4
+    MY_NE_TYPE=$5
+
+    BASENAME=`basename ${TEMPLATE} .xml`
+
+    CNTR_PROPS="${TEMPLATE/.xml/.cntrprop}"
+
+    if [[ "${TYPE}" = "NSS" ]]; then
+        pdfLimit=3
+    else
+        pdfLimit=4
+        if [[ ${MY_SIM_NAME} == RNC* ]] && [[ ${BASENAME} == type_c_rnc* ]]; then
+            BASENAME=`basename ${TEMPLATE} _${MY_SIM_NAME}.xml`
+            CNTR_PROPS="${TEMPLATE/_${MY_SIM_NAME}.xml/.cntrprop}"
+        fi
+    fi
+
+    # If we have the counter properties we should step the counters
+    if [ -r ${CNTR_PROPS} ] ; then
+        THIS_STEP_FILE=${STEP_DIR}/${BASENAME}_${THIS_TIME}_${MY_SIM_NAME}_step.xml
+        # If we haven't already stepped the counters for this template
+        if [ ! -r ${THIS_STEP_FILE} ] ; then
+            INPUT_FILE=${TEMPLATE}
+
+            # See if we have a stepped file from the previous rop,
+            # if so we use it as the base for the counter values
+            PREV_STEP_FILE=${STEP_DIR}/${BASENAME}_${PREV_TIME}_${MY_SIM_NAME}_step.xml
+            if [ ${ROP_PERIOD_MIN} -eq 1440 ] ; then
+                #Temporary file sim_name_temp.xml is used here to handle the scenario when ROP generation of 24hrs will replace step file generated for previous ROP.
+                if [ -r ${STEP_DIR}/${MY_SIM_NAME}_temp.xml ] ; then
+                    PREV_STEP_FILE=${STEP_DIR}/${MY_SIM_NAME}_temp.xml
+                fi
+            fi
+            if [ -r ${PREV_STEP_FILE} ] ; then
+                # Catch case where step file is empty for some reason
+                FILE_SIZE=`ls -l ${PREV_STEP_FILE} | awk '{print $5}'`
+                if [ ${FILE_SIZE} -gt 0 ] ; then
+                    INPUT_FILE=${PREV_STEP_FILE}
+                fi
+            fi
+
+            ${STEP_COUNTERS} --cntrprops ${CNTR_PROPS} --inFile ${INPUT_FILE} --outFile ${THIS_STEP_FILE} --pdfLimit ${pdfLimit} --simType ${MY_NE_TYPE}
+            # If we fail to generate the new step file, make sure new step file is deleted
+            if [ $? -ne 0 ] ; then
+                if [ -r ${THIS_STEP_FILE} ] ; then
+                    rm -f ${THIS_STEP_FILE}
+                fi
+            fi
+
+            #Handling for 1440 ROP
+            if [ ${ROP_PERIOD_MIN} -eq 1440 ] ; then
+                mv ${THIS_STEP_FILE} ${PREV_STEP_FILE}
+                THIS_STEP_FILE=${PREV_STEP_FILE}
+            # Don't need the previous stepped file anymore so remove it
+            elif [ -r ${PREV_STEP_FILE} ] ; then
+                   rm -f ${PREV_STEP_FILE}
+            fi
+        fi
+        TEMPLATE=${THIS_STEP_FILE}
+    fi
+
+    echo ${TEMPLATE}
+}
+
+#Method returns RNC Template name
+getRncTemplate() {
+    RNC_NAME=$1
+    HOSTNAME=$2
+
+    RNC_TYPE=$(getRncType ${RNC_NAME} ${HOSTNAME})
+    RNC_VER=`${BIN_DIR}/get_mim_ver --sim ${RNC_NAME} --netype RNC`
+    if [ $? -ne 0 ] ; then
+        log "ERROR: Failed to get MIM for RNC in sim ${RNC_NAME}"
+        removeTempFile ${RNC_NAME}
+        exit 1
+    fi
+
+    if [[ "${TYPE}" == "NSS" ]]; then
+        Template=$(ls ${XML_TEMPLATE_DIR} | grep -i "type_${RNC_TYPE}_rnc_counters_${RNC_VER}.xml")
+    else
+        Template=$(ls ${XML_TEMPLATE_DIR} | grep -i "type_${RNC_TYPE}_rnc_counters_${RNC_VER}_${RNC_NAME}.xml")
+    fi
+
+    TEMPLATE="${XML_TEMPLATE_DIR}/${Template}"
+    if [ ! -r ${TEMPLATE} ] ; then
+        echo "ERROR: Cannot find ${TEMPLATE}"
+        removeTempFile ${RNC_NAME}
+        exit 1
+    fi
+
+    echo ${TEMPLATE}
+}
+
+getTemplate() {
+
+    SIM=$1
+    NE_TYPE=$2
+    TEMPLATE_BASE=$3
+    SIM_TYPE=$4
+    EXTRA_ARGS="$5"
+
+    MIM_VER=$(${BIN_DIR}/get_mim_ver --sim ${SIM} --netype ${NE_TYPE}  ${EXTRA_ARGS})
+    if [ $? -ne 0 ] ; then
+        echo "ERROR: Failed to get MIM for ${NE_TYPE} in sim ${SIM}"
+        removeTempFile ${SIM}
+        exit 1
+    fi
+
+    TEMPLATES=""
+
+    if [ "${SIM_TYPE}" = "LTE" ] && [ ! -z "${ERBS_CELLS_CONFIG_LIST}" ]; then
+       cell_config_list=${ERBS_CELLS_CONFIG_LIST}
+       if [ -r ${NODE_CELL_TYPE} ]; then
+           cell_config_list=`cat ${NODE_CELL_TYPE} | grep -w ${SIM} | cut -d= -f3 | sort -u`
+       fi
+       for CELL in ${cell_config_list} ; do
+           Template=$(ls ${XML_TEMPLATE_DIR} | grep -i ${TEMPLATE_BASE}_counters_${MIM_VER}_${CELL}CELLS.xml)
+           TEMPLATE="${XML_TEMPLATE_DIR}/${Template}"
+           if [ ! -r ${TEMPLATE} ] ; then
+               echo "ERROR: Cannot find ${TEMPLATE}"
+               removeTempFile ${SIM}
+               exit 1
+           fi
+           TEMPLATES="${TEMPLATES} ${TEMPLATE}"
+       done
+
+    else
+         Template=$(ls ${XML_TEMPLATE_DIR} | grep -i ${TEMPLATE_BASE}_counters_${MIM_VER}.xml)
+         TEMPLATE="${XML_TEMPLATE_DIR}/${Template}"
+         if [ ! -r ${TEMPLATE} ] ; then
+              echo "ERROR: Cannot find ${TEMPLATE}"
+              removeTempFile ${SIM}
+              exit 1
+         fi
+         TEMPLATES="${TEMPLATES} ${TEMPLATE}"
+    fi
+    echo "${TEMPLATES}"
+}
+
+rnc_ranag() {
+
+    RNC_NAME=$1
+
+    # RNC STATS generation
+    echo ${NE_TYPES} | grep -w "RNC" > /dev/null
+    if [ $? -eq 0 ] ; then
+        TEMPLATE=$(getRncTemplate ${RNC_NAME} ${HOSTNAME})
+        if [ $? -ne 0 ] ; then
+            echo "ERROR Failed to getRncTemplate for ${RNC_NAME}"
+            echo "${TEMPLATE}"
+            removeTempFile ${RNC_NAME}
+            exit 1
+        fi
+
+        if [ ! -r ${ETC_DIR}/utrancell_list.txt ] ; then
+            echo "No cell list ${ETC_DIR}/utrancell_list.txt available, exiting"
+            removeTempFile ${RNC_NAME}
+            exit
+        fi
+
+        if [[ ${ENABLE_STEP_COUNTER} == "true" ]]; then
+            TEMPLATE=`stepCounters ${TEMPLATE} ${ROP_START_TIME_UTC} ${ROP_END_TIME_UTC} ${RNC_NAME} WRAN`
+        fi
+
+        CUSTOM_ARG=""
+        if [ ! -z "${CUSTOM_DIR}" ] ; then
+            if [ -r ${CUSTOM_DIR}/${RNC_NAME}.custom ] ; then
+                CUSTOM_ARG="--custom ${CUSTOM_DIR}/${RNC_NAME}.custom"
+            fi
+        fi
+
+        RNC_ROOT=${OUT_ROOT}/${RNC_NAME}/${RNC_NAME}
+        if [ ! -d ${OUT_ROOT}/${RNC_NAME}/${RNC_NAME} ] ; then
+            echo "INFO: Could not find ${OUT_ROOT}/${RNC_NAME}/${RNC_NAME}. It could be UPGIND simulation"
+            RNC_LIST=`ls ${OUT_ROOT}/${RNC_NAME} | grep RNC`
+            if [ ! -z "${RNC_LIST}" ] ; then
+                RNC_ROOT=${OUT_ROOT}/${RNC_NAME}/
+                for RNC in ${RNC_LIST} ; do
+                   cat ${TEMPLATE} | \
+                   sed -e "s/startdate/${STARTDATE_UTC}00Z/" -e "s/stopdate/${ENDDATE_UTC}00Z/" | \
+                   #${MAKE_RNC_STAT} --rnc ${RNC_NAME} --inFile - --celllist ${ETC_DIR}/utrancell_list.txt --outFile - ${CUSTOM_ARG} | \
+                   gzip -c > ${RNC_ROOT}/${RNC}/${PMDIR}/${CPP_FILENAME}.gz
+                done
+            fi
+        else
+            if [[ ${OSS_enabled} = "True" ]]; then
+                link_dir_variable="${SIM}_LINK_DIR_OSS"
+                link_dir=${!link_dir_variable}
+                symlink_prefix_variable="${SIM}_REAL_FILE_OSS"
+                symlink_prefix=${!symlink_prefix_variable}
+                real_file_path_oss="/ossrc/data/pms/segment1/"
+                rnc_fdn_oss=`echo "${RNC_FDN_OSS}"| sed "s/RNC_NODE_NAME/${RNC_NAME}/g"`
+                rnc_fdn_filename=`echo "${RNC_FDN_OSS}_statsfile.xml"| sed "s/RNC_NODE_NAME/${RNC_NAME}/g"`
+                cat ${TEMPLATE} | \
+                sed -e "s/startdate/${STARTDATE_UTC}00Z/" -e "s/stopdate/${ENDDATE_UTC}00Z/" | \
+                ${MAKE_RNC_STAT} --rnc ${RNC_NAME} --inFile - --celllist ${ETC_DIR}/utrancell_list.txt --outFile - ${CUSTOM_ARG} --oss ${OSS_enabled} --fdn ${rnc_fdn_oss}\
+                > ${RNC_ROOT}/${PMDIR}/${CPP_OSS_PREFIX}${rnc_fdn_filename}
+                mv ${RNC_ROOT}/${PMDIR}/${CPP_OSS_PREFIX}${rnc_fdn_filename} ${real_file_path_oss}
+                linkFiles ${symlink_prefix}${real_file_path_oss}${CPP_OSS_PREFIX}${rnc_fdn_filename} ${link_dir}
+            else
+            cat ${TEMPLATE} | \
+            sed -e "s/startdate/${STARTDATE_UTC}00Z/" -e "s/stopdate/${ENDDATE_UTC}00Z/" | \
+            #${MAKE_RNC_STAT} --rnc ${RNC_NAME} --inFile - --celllist ${ETC_DIR}/utrancell_list.txt --outFile - ${CUSTOM_ARG} | \
+            gzip -c > ${RNC_ROOT}/${PMDIR}/${CPP_FILENAME}.gz
+            fi
+        fi
+    fi
+
+    echo ${NE_TYPES} | grep -w "RXI" > /dev/null
+    if [ $? -eq 0 ] ; then
+        #
+        # RANAG
+        #
+        RANAG_LIST=`ls ${OUT_ROOT}/${RNC_NAME} | grep RXI`
+        if [ ! -z "${RANAG_LIST}" ] ; then
+            TEMPLATE=$(getTemplate ${RNC_NAME} RXI ranag)
+            if [ $? -ne 0 ] ; then
+                echo "ERROR: Failed to get template for RXI in sim ${RNC_NAME}"
+                echo "${TEMPLATE}"
+                removeTempFile ${RNC_NAME}
+                exit 1
+            fi
+
+            if [[ ${ENABLE_STEP_COUNTER} == "true" ]]; then
+                TEMPLATE=$(stepCounters ${TEMPLATE} ${ROP_START_TIME_UTC} ${ROP_END_TIME_UTC} ${RNC_NAME} WRAN)
+            fi
+            for RANAG in ${RANAG_LIST} ; do
+                DEST_FILE="${OUT_ROOT}/${RNC_NAME}/${RANAG}/${PMDIR}/${CPP_FILENAME}.gz"
+                cat ${TEMPLATE} | \
+                    sed -e "s/startdate/${STARTDATE_UTC}00Z/" -e "s/stopdate/${ENDDATE_UTC}00Z/" | \
+                    gzip -c > ${DEST_FILE}
+            done
+        fi
+    fi
+}
+
+processNodeBs() {
+
+    SIM=$1
+    NODEB_TYPE=$2
+    TEMPLATE_PREFIX=$3
+    CELL_LIST=$4
+    CELL_TYPE=$5
+    EXTRA_ARGS="$6"
+    NODE_DIR=$7
+    FILENAME=$8
+    NETSIM_NETYPE=$9
+    SIM_TYPE=${10}
+    JOBID=${11}
+
+    FIRST_CELL=`grep --max-count=1 ${SIM} ${CELL_LIST}`
+    SUBNETWORK_PREFIX=`echo ${FIRST_CELL} | sed 's/,MeContext.*//'`
+    MECONTEXT_ID=$(echo ${FIRST_CELL} | sed 's/.*,MeContext=//' | sed 's/,ManagedElement.*//')
+    MECONTEXT_PREFIX=$(echo ${MECONTEXT_ID} | sed "s/${SIM}.*//")
+
+    if [[ ! ${SUBNETWORK_PREFIX} == *"SubNetwork"* ]]; then
+          SUBNETWORK_PREFIX=""
+    fi
+
+    if [ -z "${SUBNETWORK_PREFIX}" ]; then
+        FDN="MeContext=${MECONTEXT_PREFIX}${NODE_DIR}"
+    else
+        FDN="${SUBNETWORK_PREFIX},MeContext=${MECONTEXT_PREFIX}${NODE_DIR}"
+    fi
+
+    if [ "$SIM_TYPE" = "GNODEBRADIO" ];then
+       FDN="SubNetwork=ONRM_RootMo_R,SubNetwork=${SIM_TYPE},MeContext=${NODE_DIR}"
+       NODEB_VER=`cat /netsim/genstats/tmp/sim_data.txt  | grep $SIM | awk -F' ' '{print $8}'`
+    elif [[ "$SIM_TYPE" = "LTE" ]]; then
+       NODEB_VER=`cat /netsim/genstats/tmp/sim_data.txt  | grep $SIM | awk -F' ' '{print $8}'`
+    fi
+
+    if [ $? -ne 0 ] ; then
+        echo "ERROR: Failed to get MIM for ${NETSIM_NETYPE} in sim ${SIM}"
+        return 1
+    fi
+    if [ ! -z ${JOBID} ] ; then
+         Template=$(printf "%s_counters_%s-%s.xml" ${TEMPLATE_PREFIX} ${NODEB_VER} ${JOBID})
+         TEMPLATE="${XML_TEMPLATE_DIR}/${Template}"
+         if [ ! -r ${TEMPLATE} ] ; then
+              echo "ERROR: Cannot find ${TEMPLATE}"
+              return 1
+         fi
+
+    else
+         if [ "${SIM_TYPE}" = "GNODEBRADIO" ] ;then
+            for cell in `echo "1 3 6 12"`; do
+                Template=`ls $XML_TEMPLATE_DIR | grep "gnodebradio_counters_${NODEB_VER}_${SIM}" | grep "${cell}CELLS" | grep .xml$`;
+                TEMPLATE="${XML_TEMPLATE_DIR}/${Template}"
+                if [ ! -r ${TEMPLATE} ] ; then
+                    echo "ERROR: Cannot find ${TEMPLATE}"
+                    return 1
+                fi
+                TEMPLATES="${TEMPLATES} ${TEMPLATE}"
+            done
+         elif [ "${SIM_TYPE}" = "LTE" ] &&  [ ! -z "${ERBS_CELLS_CONFIG_LIST}" ]; then
+             cell_config_list=${ERBS_CELLS_CONFIG_LIST}
+             if [ -r "${NODE_CELL_TYPE}" ]; then
+                 cell_config_list=`cat ${NODE_CELL_TYPE} | grep -w ${SIM} | cut -d= -f3 | sort -u`
+             fi
+             for CELL in ${cell_config_list} ; do
+                 Template=$(printf "%s_counters_%s_%sCELLS.xml" ${TEMPLATE_PREFIX} ${NODEB_VER} ${CELL})
+                 TEMPLATE="${XML_TEMPLATE_DIR}/${Template}"
+                 if [ ! -r ${TEMPLATE} ] ; then
+                      echo "ERROR: Cannot find ${TEMPLATE}"
+                      return 1
+                 fi
+                 TEMPLATES="${TEMPLATES} ${TEMPLATE}"
+             done
+         else
+             Template=$(printf "%s_counters_%s.xml" ${TEMPLATE_PREFIX} ${NODEB_VER})
+             TEMPLATE="${XML_TEMPLATE_DIR}/${Template}"
+             if [ ! -r ${TEMPLATE} ] ; then
+                 echo "ERROR: Cannot find ${TEMPLATE}"
+                 return 1
+             fi
+         fi
+    fi
+
+    # Common for WRAN & LTE
+
+    #
+    # RBS
+    # Updated 17/04/08 Create a file per RBS as WMRR and CAR need the sn tag to be correct
+    #
+
+    # makeRbsStat with replace RNC_NAME with rnc parameter
+    # Same for RBS_NUM
+    RBS_ROOT=${OUT_ROOT}
+    if [ ! -d ${RBS_ROOT} ] ; then
+        echo "ERROR: Could not find ${RBS_ROOT}"
+        return 1
+    fi
+
+    ne_file_location="${NODEB_TYPE}"_PM_FileLocation
+    PM_FILE_DIR=${!ne_file_location}
+
+    if [[ ${SIM} == *"RNC"* && ${NODEB_TYPE} == "PRBS" ]] ; then
+        PM_FILE_DIR=""
+    fi
+
+    if [ -z "${PM_FILE_DIR}" ] ; then
+        PM_FILE_DIR=${PMDIR}
+    fi
+
+    if [[ ${OSS_enabled} = "True" ]]; then
+        if [[ ${SIM} == *"RNC"* && ${NODEB_TYPE} == "RBS" ]]; then
+            FILENAME=`echo "${FILENAME}_statsfile.xml"| sed "s/RBS_NODE_NAME/${NODE_DIR}/g" | sed "s/RNC_NODE_NAME/${SIM}/g"`
+        fi
+    fi
+
+    if [[ "${SIM_TYPE}" = "GNODEBRADIO" ]]; then
+        SHORT_NR_NAME=$(echo ${SIM} | rev | awk -F'-' '{print $1}' | rev)
+        fake_fdn="SubNetwork=Europe,SubNetwork=Ireland,MeContext=${SHORT_NR_NAME}gNodeBRadioRBS_NUM"
+    elif [[ "${SIM_TYPE}" = "LTE" ]];then
+        fake_fdn="SubNetwork=Europe,SubNetwork=Ireland,MeContext=RNC_NAMEdg2ERBSRBS_NUM"
+    fi
+    #RBS_ROOT=$(echo ${OUT_ROOT} | sed "s/node-dir/${fake_fdn}/g")
+
+    DEST_FILE=${RBS_ROOT}/${fake_fdn}/${FILENAME}
+    if [[ "${SIM_TYPE}" = "LTE" && ! -z "${ERBS_CELLS_CONFIG_LIST}" ]] || [[ "${SIM_TYPE}" = "GNODEBRADIO" ]]; then
+        TEMPLATE_FILES=""
+        if [[ ${EXEC_FROM_HC} == "YES" ]]; then
+            TEMPLATE_SUFFIX="healthcheck"
+        else
+            TEMPLATE_SUFFIX="normal"
+        fi
+        if [[ ${FUTURE_ROP_GEN} == "YES" ]]; then
+        for TEMPLATE in ${TEMPLATES} ; do
+                UNIQUE_TEMPLATE_NAME="${TEMPLATE}.tmp_FUTURE_${current_epoch}"
+                cat ${TEMPLATE} | \
+                    sed -e "s/startdate/${STARTDATE_UTC}00Z/g" \
+                        -e "s/stopdate/${ENDDATE_UTC}00Z/" \
+                        -e "s/${ECIM_JOB_BEGIN_TIME_DEFAULT}/${ECIM_JOB_START_TIME}/g" \
+                        -e "s/${ECIM_JOB_END_TIME_DEFAULT}/${ECIM_JOB_END_TIME}/g" \
+                        -e "s/${ECIM_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" \
+                        -e "s/${MSRBS_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/" > ${UNIQUE_TEMPLATE_NAME}
+                #Prevent overwritting of existing .tmp files in case of parallel execution of script
+
+            TEMPLATE_FILES="${TEMPLATE_FILES};${UNIQUE_TEMPLATE_NAME}"
+        done
+    else
+        for TEMPLATE in ${TEMPLATES} ; do
+            if [[ ${ENABLE_STEP_COUNTER} == "true" ]]; then
+                TEMPLATE=$(stepCounters ${TEMPLATE} ${ROP_START_TIME_UTC} ${ROP_END_TIME_UTC} ${SIM} ${SIM_TYPE})
+            fi
+            #Update startdatetime and end date time
+            ##Prevent the process from starting if the file already exists
+            if [[ ! -f ${TEMPLATE}.tmp ]]; then
+                UNIQUE_TEMPLATE_NAME="${TEMPLATE}_${TEMPLATE_SUFFIX}.tmp"
+                cat ${TEMPLATE} | \
+                    sed -e "s/startdate/${STARTDATE_UTC}00Z/g" \
+                        -e "s/stopdate/${ENDDATE_UTC}00Z/" \
+                        -e "s/${ECIM_JOB_BEGIN_TIME_DEFAULT}/${ECIM_JOB_START_TIME}/g" \
+                        -e "s/${ECIM_JOB_END_TIME_DEFAULT}/${ECIM_JOB_END_TIME}/g" \
+                        -e "s/${ECIM_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" \
+                        -e "s/${MSRBS_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/" > ${UNIQUE_TEMPLATE_NAME}
+                #Prevent overwritting of existing .tmp files in case of parallel execution of script
+                if [[ -f ${TEMPLATE}.tmp ]];then
+                    log "INFO: Template ${TEMPLATE}.tmp already exists"
+                else
+                    mv ${UNIQUE_TEMPLATE_NAME} ${TEMPLATE}.tmp
+                fi
+            else
+                 log "INFO: Template ${TEMPLATE}.tmp already exists"
+            fi
+
+            TEMPLATE="${TEMPLATE}.tmp"
+            TEMPLATE_FILES="${TEMPLATE_FILES};${TEMPLATE}"
+        done
+        fi
+    else
+       if [[ ${ENABLE_STEP_COUNTER} == "true" ]]; then
+           TEMPLATE=$(stepCounters ${TEMPLATE} ${ROP_START_TIME_UTC} ${ROP_END_TIME_UTC} ${SIM} ${NODEB_TYPE})
+       fi
+    fi
+
+    SIM_NAME="$(ls /netsim/netsim_dbdir/simdir/netsim/netsimdir/ | grep -w ${SIM})"
+
+    if [ ${NODEB_TYPE} = "PRBS" ] ; then
+        if [ ${OSS_enabled} == "True" ]; then
+            link_dir_variable="${SIM}_${NODEB_TYPE}_LINK_DIR_OSS"
+            link_dir=${!link_dir_variable}
+            symlink_prefix_variable="${SIM}_${NODEB_TYPE}_REAL_FILE_OSS"
+            symlink_prefix=${!symlink_prefix_variable}
+        fi
+        cat ${TEMPLATE} | \
+            sed   -e "s/${ECIM_JOB_BEGIN_TIME_DEFAULT}/${ECIM_JOB_START_TIME}/g" \
+                  -e "s/${ECIM_JOB_END_TIME_DEFAULT}/${ECIM_JOB_END_TIME}/g" \
+                  -e "s/${MSRBS_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" \
+                  -e "s/${ECIM_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" | \
+            ${MAKE_RBS_STAT} --inFile - --rnc ${SIM} \
+                             --path "${DEST_FILE}" --fdn "${FDN}" --simdir ${RBS_ROOT}/ ${EXTRA_ARGS} --oss "${OSS_enabled}" --linkdir "${link_dir}" --symlink "${symlink_prefix}"
+    else
+        if [ "${SIM_TYPE}" = "LTE" ] && [ ! -z "${ERBS_CELLS_CONFIG_LIST}" ]; then
+            if [ ${OSS_enabled} == "True" ]; then
+                link_dir_variable="${SIM}"_LINK_DIR_OSS
+                link_dir=${!link_dir_variable}
+                symlink_prefix_variable="${SIM}_REAL_FILE_OSS"
+                symlink_prefix=${!symlink_prefix_variable}
+            fi
+            ${MAKE_RBS_STAT} --inFile "${TEMPLATE_FILES}" --rnc ${SIM} \
+                 -path "${DEST_FILE}" --fdn "${FDN}" --simdir ${RBS_ROOT}/ ${EXTRA_ARGS} --oss "${OSS_enabled}" --linkdir "${link_dir}" --symlink "${symlink_prefix}"-path "${DEST_FILE}" --fdn "${FDN}" --simdir ${RBS_ROOT}/ ${EXTRA_ARGS} --oss "${OSS_enabled}" --linkdir "${link_dir}" --symlink "${symlink_prefix}" --epoch_dir "${epoch_rop_folder}"
+            if [[ ${FUTURE_ROP_GEN} == "YES" ]]; then
+                future_temp_templates=$(echo ${TEMPLATE_FILES} | sed 's/;/ /g')
+                for future_temp_template in ${future_temp_templates}; do
+                    rm -f ${future_temp_template}
+                done
+            fi
+        elif [ "${SIM_TYPE}" = "GNODEBRADIO" ] ; then
+            ${NR_MAKE_RBS_STAT} --inFile "${TEMPLATE_FILES}" --rnc ${SIM} \
+                 --path "${DEST_FILE}" --fdn "${FDN}" --simdir ${RBS_ROOT}/ ${EXTRA_ARGS} --oss "${OSS_enabled}" --linkdir "${link_dir}" --symlink "${symlink_prefix}" --epoch_dir "${epoch_rop_folder}"
+            if [[ ${FUTURE_ROP_GEN} == "YES" ]]; then
+                future_temp_templates=$(echo ${TEMPLATE_FILES} | sed 's/;/ /g')
+                for future_temp_template in ${future_temp_templates}; do
+                    rm -f ${future_temp_template}
+                done
+            fi
+else
+                    if [ ${OSS_enabled} == "True" ]; then
+                if [[ ${SIM} == *"RNC"* ]]; then
+                    link_dir_variable="${SIM}_${NODEB_TYPE}_LINK_DIR_OSS"
+                    link_dir=${!link_dir_variable}
+                    symlink_prefix_variable="${SIM}_${NODEB_TYPE}_REAL_FILE_OSS"
+                    symlink_prefix=${!symlink_prefix_variable}
+                else
+                    link_dir_variable="${SIM}"_LINK_DIR_OSS
+                    link_dir=${!link_dir_variable}
+                    symlink_prefix_variable="${SIM}_REAL_FILE_OSS"
+                    symlink_prefix=${!symlink_prefix_variable}
+                fi
+            fi
+            cat ${TEMPLATE} | \
+                sed -e "s/startdate/${STARTDATE_UTC}00Z/" -e "s/stopdate/${ENDDATE_UTC}00Z/" \
+                    -e "s/${ECIM_JOB_BEGIN_TIME_DEFAULT}/${ECIM_JOB_START_TIME}/g" \
+                    -e "s/${ECIM_JOB_END_TIME_DEFAULT}/${ECIM_JOB_END_TIME}/g" \
+                    -e "s/${ECIM_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" \
+                    -e "s/${MSRBS_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/" | \
+                      ${MAKE_RBS_STAT} --inFile - --rnc ${SIM} \
+                          --path "${DEST_FILE}" --fdn "${FDN}" --simdir ${RBS_ROOT}/ ${EXTRA_ARGS} --oss "${OSS_enabled}" --linkdir "${link_dir}" --symlink "${symlink_prefix}"
+        fi
+    fi
+}
+
+processSim() {
+
+    SIM=$1
+    SIM_FILTER=`echo ${SIM} | sed 's/-/_/g'`
+
+    SIM_TYPE=`getSimType ${SIM}`
+
+    #Check if NETYPES and SIM_TYPE is in supported NE_TYPE list
+    if [[ ${SIM_TYPE} = *"MSC"* ]];then
+       echo ${NE_TYPES} | egrep -w "${SIM_TYPE}|MSC_BSC" > /dev/null
+       if [[ $? -ne 0 ]];then
+            return
+       fi
+    else
+       echo ${NE_TYPES} | grep -i -w "${SIM_TYPE}" > /dev/null
+       if [ $? -ne 0 ];then
+          return
+       fi
+    fi
+
+
+    if [[ "${SIM_TYPE}" == "CCES" ]];then
+        if [[ "${TYPE}" == *"NRM"*  ]] || [[ "${TYPE}" == "MD_1"  ]] ;then
+            log "WARN: ${SIM_TYPE} node type is not supported for ${TYPE} deployment."
+            return
+        fi
+
+
+    elif [[ "${SIM_TYPE}" == "R6273" || "${SIM_TYPE}" == "R6673" ]] ;then
+       if [[ "${TYPE}" == *"NRM"*  ]] || [[ "${TYPE}" == "MD_1"  ]] || [[ "${TYPE}" == "DO"  ]] ;then
+           log "WARN: ${SIM_TYPE} node type is not supported for ${TYPE} deployment."
+           return
+        fi
+    fi
+
+
+    if [[ ${DAILY_ROP} == "YES" ]]; then
+        echo ${ROUTER_NE_TYPES} | grep ${SIM_TYPE} > /dev/null
+        if [[ $? -eq 0 ]]; then
+            log "INFO: Generating 24 hour ROP for simulation ${SIM}."
+        else
+            log "INFO: Ignoring simulation ${SIM} for 24 hour ROP generation."
+            return
+        fi
+    fi
+
+    if [[ ${SIM} == *"TCU02"* || ${SIM} == *"SIU02"* || ${SIM} == *"ERSN"* || ${SIM_FILTER} == *"ERS_SN_ESC"*  || ${SIM_FILTER} == *"ERS_SN_SCU"*  ||  ${SIM}  == *"SCU"*  ]]; then
+        #TRANSPORT SIM STATS file generation
+        processTransportNodes ${SIM}
+        return
+    fi
+
+    if [[ "${edeStatsCheck}" = "True" ]]; then
+        if [[ "${SIM_TYPE}" == *"FRONTHAUL"* ]]; then
+           return
+        fi
+    fi
+
+    if [[ "${SIM_TYPE}" == "UNKNOWN" ]]; then
+        log "ERROR: ${SIM_TYPE} node type. Skipping ${SIM} for PM generation."
+        return
+    fi
+
+    if [[ "${SIM_TYPE}" == "EPG-SSR" ]] || [[ "${SIM_TYPE}" == "EPG-EVR" ]]; then
+        processEPGSim EPG ${SIM_TYPE} $SIM
+
+    elif [[ "${SIM_TYPE}" == "PCC" ]] || [[ "${SIM_TYPE}" == "PCG" ]]; then
+                if [[ ${PCC_PCG_FOR_ESOA} == "true" ]]; then
+                  if [[ ${PCC_PCG_FOR_ESOA_PERFORMANCE} == "true" ]]; then
+                    # This execution only for esoa pcc_pcg performance use case, for fucntional use case there is a seperate method
+                    # Need to correct code logic as per performance use case
+                          processPCCnPCGSimForESOA ${SIM_TYPE} $SIM
+                        fi
+                else
+                        processPCCnPCGSim ${SIM_TYPE} $SIM
+                fi
+    elif [[ "${SIM_TYPE}" == "SHARED-CNF" || "${SIM_TYPE}" == "CIMS" ]]; then
+        if [[  $ROP_PERIOD_MIN == 15 || $EXEC_FROM_HC == YES ]] && [[ ${TYPE} == NSS ]] ;then
+            processPCCnPCGSim ${SIM_TYPE} $SIM
+        fi
+
+    elif [[ "${SIM_TYPE}" == "CCSM" ]] || [[ "${SIM_TYPE}" == "CCDM" ]] || [[ "${SIM_TYPE}" == "CCRC" ]] || [[ "${SIM_TYPE}" == "CCPC" ]] || [[ "${SIM_TYPE}" == "SC" ]] || [[ "${SIM_TYPE}" == "CCES" ]] || [[ "${SIM_TYPE}" == "SMSF" ]]; then
+        if [[ "${SIM_TYPE}" == "SMSF"  && "${TYPE}" == "NRM"* ]];then
+            continue
+        else
+            process5GSim ${SIM_TYPE} $SIM
+        fi
+
+    elif [[ "${SIM_TYPE}" = "vMSC-HC" ]] || [[ "${SIM_TYPE}" = "vMSC" ]] || [[ "${SIM_TYPE}" = "MSCv" ]] || [[ "${SIM_TYPE}" = "MSC-vIP-STP" ]] || [[ "${SIM_TYPE}" = "MSC-IP-STP" ]] || [[ "${SIM_TYPE}" = "CTC-MSC-BC-BSP" ]] || [[ "${SIM_TYPE}" = "MSC-DB-BSP" ]] || [[ "${SIM_TYPE}" = "MSC-DB" ]] || [[ "${SIM_TYPE}" = "MSC-BC-IS" ]] || [[ "${SIM_TYPE}" = "MSC-BC-BSP" ]];then
+        processMSCSim ${SIM_TYPE} MSC $SIM
+
+    elif [[ "${SIM_TYPE}" = "BSC" ]]; then
+        processBSCSim ${SIM_TYPE} BSC $SIM
+
+    elif [[ "${SIM_TYPE}" = "vHLR-BS" ]] || [[ "${SIM_TYPE}" = "HLR-FE" ]] || [[ "${SIM_TYPE}" = "HLR-FE-IS" ]] || [[ "${SIM_TYPE}" = "HLR-FE-BSP" ]]; then
+        processHLRSim ${SIM_TYPE} HLR-FE $SIM
+
+    elif [ "${SIM_TYPE}" = "WRAN" ] || [ "${SIM_TYPE}" = "RBS" ] ; then
+        # Check for LTE file generation through EDE-STATS
+        if [[ "${edeStatsCheck}" = "True" ]]; then
+            return
+        fi
+
+        if [ "${SIM_TYPE}" = "WRAN" ]; then
+            rnc_ranag $SIM
+        fi
+
+        if [[ ${ROP_PERIOD_MIN} == "1" ]] || [[ ${ROP_PERIOD_MIN} == "15" ]]; then
+            # For RBS
+            ls ${OUT_ROOT}/ | grep RBS | grep -v PRBS | grep -v MSRBS-V2 > /dev/null
+            if [ $? -eq 0 ] ; then
+                if [[ ${OSS_enabled} = "True" ]]; then
+                    processNodeBs $SIM RBS rbs ${ETC_DIR}/utrancell_list.txt UtranCell \
+                                  "--netype RBS" "RNC_NAMERBSRBS_NUM" "${CPP_OSS_PREFIX}${RBS_FDN_OSS}" RBS
+                else
+                    processNodeBs $SIM RBS rbs ${ETC_DIR}/utrancell_list.txt UtranCell \
+                                  "--netype RBS" "RNC_NAMERBSRBS_NUM" ${CPP_FILENAME}.gz RBS
+                fi
+            fi
+
+            # For PRBS
+            # Pico
+            ls ${OUT_ROOT}/ | grep PRBS > /dev/null
+            if [ $? -eq 0 ] ; then
+                    # For MIXED MODE STATS file generation
+                    for JOBID in ${PRBS_MIX_MODE_JOBID_LIST} ; do
+                        if [ "${PRBS_FILE_COMP_NEEDED}" = "NO" ] ; then
+                            PRBS_FILENAME="${ECIM_FILENAME_PREFIX}-${JOBID}_RNC_NAMEPRBSRBS_NUM${XML_EXTENSION}"
+                        else
+                            PRBS_FILENAME="${ECIM_FILENAME_PREFIX}-${JOBID}_RNC_NAMEPRBSRBS_NUM${XML_EXTENSION}.gz"
+                        fi
+                            processNodeBs $SIM PRBS msrbs_v1 ${ETC_DIR}/utrancell_list.txt UtranCell \
+                                "--netype PRBS" "RNC_NAMEPRBSRBS_NUM" ${PRBS_FILENAME} PRBS ${JOBID}
+
+                    done
+                    # For common file or non mix mode
+                    if [[ ${OSS_enabled} == "True" ]]; then
+                        fdn_var="${SIM_TYPE}"_MSRBS_V1_FDN_OSS
+                        MSRBS_V1_FDN_OSS=${!fdn_var}
+                        if [ "${PRBS_FILE_COMP_NEEDED}" = "YES" ] ; then
+                            PRBS_FILENAME="${ECIM_FILENAME_PREFIX}${MSRBS_V1_FDN_OSS}RNC_NAMEPRBSRBS_NUM_statsfile${XML_EXTENSION}.gz"
+                        else
+                            PRBS_FILENAME="${ECIM_FILENAME_PREFIX}${MSRBS_V1_FDN_OSS}RNC_NAMEPRBSRBS_NUM_statsfile${XML_EXTENSION}"
+                        fi
+                        processNodeBs $SIM PRBS msrbs_v1 ${ETC_DIR}/utrancell_list.txt UtranCell \
+                              "--netype PRBS" "RNC_NAMEPRBSRBS_NUM" ${PRBS_FILENAME} PRBS
+                    else
+                        if [ "${PRBS_FILE_COMP_NEEDED}" = "NO" ] ; then
+                            PRBS_FILENAME="${ECIM_FILENAME_PREFIX}RNC_NAMEPRBSRBS_NUM${XML_EXTENSION}"
+                        else
+                            PRBS_FILENAME="${ECIM_FILENAME_PREFIX}RNC_NAMEPRBSRBS_NUM${XML_EXTENSION}.gz"
+                        fi
+                        processNodeBs $SIM PRBS msrbs_v1 ${ETC_DIR}/utrancell_list.txt UtranCell \
+                              "--netype PRBS" "RNC_NAMEPRBSRBS_NUM" ${PRBS_FILENAME} PRBS
+                    fi
+
+            fi
+
+            # WRAN DG2
+            # Pico
+            ls ${OUT_ROOT}/ | grep MSRBS-V2 > /dev/null
+            if [ $? -eq 0 ] ; then
+
+                # For MIXED MODE STATS file generation
+                for JOBID in ${WCDMA_MSRBS_V2_MIX_MODE_JOBID_LIST} ; do
+
+                    MSRBS_V2_FILENAME="A${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_TIME_UTC}_-${JOBID}_RNC_NAMEMSRBS-VRBS_NUM${XML_EXTENSION}"
+                    processNodeBs $SIM MSRBS_V2 wcdma_msrbs_v2 ${ETC_DIR}/utrancell_list.txt UtranCell \
+                        "--netype WRANMSRBS_V2" "RNC_NAMEMSRBS-VRBS_NUM" ${MSRBS_V2_FILENAME}.gz MSRBS-V2 WCDMA ${JOBID}
+
+                done
+                # For common file or non mix mode
+                if [[ ${OSS_enabled} = "True" ]]; then
+                    fdn_var="${SIM_TYPE}"_MSRBS_V2_FDN_OSS
+                    MSRBS_V2_FDN_OSS=${!fdn_var}
+                    MSRBS_V2_FILENAME="A${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_TIME_UTC}_${MSRBS_V2_FDN_OSS}RNC_NAMEMSRBS-VRBS_NUM_statsfile${XML_EXTENSION}"
+                    processNodeBs $SIM MSRBS_V2 wcdma_msrbs_v2 ${ETC_DIR}/utrancell_list.txt UtranCell \
+                        "--netype WRANMSRBS_V2" "RNC_NAMEMSRBS-VRBS_NUM" ${MSRBS_V2_FILENAME} MSRBS-V2 WCDMA ""
+                else
+                    MSRBS_V2_FILENAME="A${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_TIME_UTC}_RNC_NAMEMSRBS-VRBS_NUM${XML_EXTENSION}"
+                    processNodeBs $SIM MSRBS_V2 wcdma_msrbs_v2 ${ETC_DIR}/utrancell_list.txt UtranCell \
+                        "--netype WRANMSRBS_V2" "RNC_NAMEMSRBS-VRBS_NUM" ${MSRBS_V2_FILENAME}.gz MSRBS-V2 WCDMA ""
+                fi
+            fi
+        fi
+    elif [ "${SIM_TYPE}" = "GNODEBRADIO" ] && [[ ${TYPE} != "DO" ]] && [[ ${TYPE} != "MD_1" ]]; then
+         SHORT_NR_NAME=$(echo ${SIM} | rev | awk -F'-' '{print $1}' | rev)
+         #GNODEBRADIO_FILENAME="A${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_TIME_UTC}_${SHORT_NR_NAME}gNodeBRadioRBS_NUM${XML_EXTENSION}"
+         GNODEBRADIO_FILENAME="${ECIM_FILENAME_PREFIX}SubNetwork=Europe,SubNetwork=Ireland,MeContext=${SHORT_NR_NAME}gNodeBRadioRBS_NUM,ManagedElement=${SHORT_NR_NAME}gNodeBRadioRBS_NUM_statsfile${XML_EXTENSION}"
+         processNodeBs $SIM GNODEBRADIO gnodebradio ${ETC_DIR}/nr_cell_data.txt   NRCellCU \
+                              "--netype GNODEBRADIO --celllist ${ETC_DIR}/nr_cell_data.txt" "${SHORT_NR_NAME}gNodeBRadioRBS_NUM" ${GNODEBRADIO_FILENAME}.gz GNODEBRADIO ${SIM_TYPE}
+    elif [ "${SIM_TYPE}" = "LTE" ] ; then
+        # LTE
+
+    # Check for LTE file generation through EDE-STATS
+        if [[ "${edeStatsCheck}" = "True" ]]; then
+            return
+        fi
+
+        ls ${OUT_ROOT}/ | grep pERBS > /dev/null
+        if [ $? -eq 0 ] ; then
+            # PICO LTE (MSRBS_V1)
+
+            # For MIXED MODE STATS file generation
+            for JOBID in ${MSRBS_V1_MIX_MODE_JOBID_LIST} ; do
+
+                if [ "${MSRBS_V1_FILE_COMP_NEEDED}" = "NO" ] ; then
+                    PRBS_FILENAME="${ECIM_FILENAME_PREFIX}_-${JOBID}_RNC_NAMEpERBSRBS_NUM${XML_EXTENSION}"
+                else
+                    PRBS_FILENAME="${ECIM_FILENAME_PREFIX}_-${JOBID}_RNC_NAMEpERBSRBS_NUM${XML_EXTENSION}.gz"
+                fi
+                processNodeBs $SIM MSRBS_V1 msrbs_v1 ${ETC_DIR}/eutrancellfdd_list.txt   EUtranCellFFD \
+                    "--netype MSRBS_V1 --celllist ${ETC_DIR}/eutrancellfdd_list.txt" "RNC_NAMEpERBSRBS_NUM" ${PRBS_FILENAME} PRBS ${SIM_TYPE} ${JOBID}
+
+            done
+                    # For common file or non mix mode
+            if [[ "${OSS_enabled}" = "True" ]]; then
+                fdn_var="${SIM_TYPE}"_MSRBS_V1_FDN_OSS
+                                      MSRBS_V1_FDN_OSS=${!fdn_var}
+                if [ "${MSRBS_V1_FILE_COMP_NEEDED}" = "YES" ] ; then
+                    PRBS_FILENAME="${ECIM_FILENAME_PREFIX}${MSRBS_V1_FDN_OSS}RNC_NAMEpERBSRBS_NUM_statsfile${XML_EXTENSION}.gz"
+                else
+
+                    PRBS_FILENAME="${ECIM_FILENAME_PREFIX}${MSRBS_V1_FDN_OSS}RNC_NAMEpERBSRBS_NUM_statsfile${XML_EXTENSION}"
+                  fi
+            else
+
+                if [ "${MSRBS_V1_FILE_COMP_NEEDED}" = "NO" ] ; then
+                    PRBS_FILENAME="${ECIM_FILENAME_PREFIX}RNC_NAMEpERBSRBS_NUM${XML_EXTENSION}"
+                else
+
+                    PRBS_FILENAME="${ECIM_FILENAME_PREFIX}RNC_NAMEpERBSRBS_NUM${XML_EXTENSION}.gz"
+                fi
+            fi
+            processNodeBs $SIM MSRBS_V1 msrbs_v1 ${ETC_DIR}/eutrancellfdd_list.txt   EUtranCellFFD \
+                "--netype MSRBS_V1 --celllist ${ETC_DIR}/eutrancellfdd_list.txt" "RNC_NAMEpERBSRBS_NUM" ${PRBS_FILENAME} PRBS ${SIM_TYPE}
+        fi
+
+        # MSRBS_V2
+        ls ${OUT_ROOT}/ | grep dg2ERBS > /dev/null
+        if [ $? -eq 0 ] ; then
+            # LTE  GEN2(MSRBS_V2)
+
+                # For MIXED MODE STATS file generation
+                for JOBID in ${LTE_MSRBS_V2_MIX_MODE_JOBID_LIST} ; do
+
+                     MSRBS_V2_FILENAME="A${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_TIME_UTC}_-${JOBID}_RNC_NAMEdg2ERBSRBS_NUM${XML_EXTENSION}"
+                     processNodeBs $SIM MSRBS_V2 lte_msrbs_v2 ${ETC_DIR}/eutrancellfdd_list.txt   EUtranCellFFD \
+                         "--netype MSRBS_V2 --celllist ${ETC_DIR}/eutrancellfdd_list.txt" "RNC_NAMEdg2ERBSRBS_NUM" ${MSRBS_V2_FILENAME}.gz MSRBS-V2 ${SIM_TYPE} ${JOBID}
+
+                done
+                # For common file or non mix mode
+                if [[ "${OSS_enabled}" = "True" ]]; then
+                                fdn_var="${SIM_TYPE}"_MSRBS_V2_FDN_OSS
+                                    MSRBS_V2_FDN_OSS=${!fdn_var}
+                    MSRBS_V2_FILENAME="A${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_TIME_UTC}_${MSRBS_V2_FDN_OSS}RNC_NAMEdg2ERBSRBS_NUM_statsfile${XML_EXTENSION}"
+                    processNodeBs $SIM MSRBS_V2 lte_msrbs_v2 ${ETC_DIR}/eutrancellfdd_list.txt   EUtranCellFFD \
+                              "--netype MSRBS_V2 --celllist ${ETC_DIR}/eutrancellfdd_list.txt" "RNC_NAMEdg2ERBSRBS_NUM" ${MSRBS_V2_FILENAME} MSRBS-V2 ${SIM_TYPE}
+                else
+                    #MSRBS_V2_FILENAME="A${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_TIME_UTC}_RNC_NAMEdg2ERBSRBS_NUM${XML_EXTENSION}"
+                    MSRBS_V2_FILENAME="${ECIM_FILENAME_PREFIX}SubNetwork=Europe,SubNetwork=Ireland,MeContext=RNC_NAMEdg2ERBSRBS_NUM,ManagedElement=RNC_NAMEdg2ERBSRBS_NUM_statsfile${XML_EXTENSION}"
+                    processNodeBs $SIM MSRBS_V2 lte_msrbs_v2 ${ETC_DIR}/eutrancellfdd_list.txt   EUtranCellFFD \
+                              "--netype MSRBS_V2 --celllist ${ETC_DIR}/eutrancellfdd_list.txt" "RNC_NAMEdg2ERBSRBS_NUM" ${MSRBS_V2_FILENAME}.gz MSRBS-V2 ${SIM_TYPE}
+                fi
+            fi
+
+        #ERBS
+        ls ${OUT_ROOT}/ | grep ERBS | grep -v pERBS | grep -v dg2ERBS | grep -v SUBNW > /dev/null
+        if [ $? -eq 0 ] ; then
+
+            # ERBS
+            if [[ "${OSS_enabled}" = "True" ]]; then
+                    processNodeBs $SIM ERBS erbs ${ETC_DIR}/eutrancellfdd_list.txt EUtranCellFFD \
+                              "--netype ERBS --celllist ${ETC_DIR}/eutrancellfdd_list.txt" "RNC_NAMEERBSRBS_NUM" ${CPP_OSS_PREFIX}${ERBS_FDN_OSS}"RNC_NAMEERBSRBS_NUM_statsfile.xml" ERBS ${SIM_TYPE}
+                else
+                    processNodeBs $SIM ERBS erbs ${ETC_DIR}/eutrancellfdd_list.txt EUtranCellFFD \
+                              "--netype ERBS --celllist ${ETC_DIR}/eutrancellfdd_list.txt" "RNC_NAMEERBSRBS_NUM" ${CPP_FILENAME}.gz ERBS ${SIM_TYPE}
+                fi
+            fi
+
+    # MGW
+    elif [ "${SIM_TYPE}" = "MGW" ] || [ "${SIM_TYPE}" = "MRS" ]; then
+
+            echo ${NE_TYPES} | egrep -w -i "mgw|mrs" > /dev/null
+            if [[ $? -ne 0 ]]; then
+               return
+            fi
+
+            MGW_LIST=`ls ${OUT_ROOT}/`
+            if [ ! -z "${MGW_LIST}" ] ; then
+                if [ "${SIM_TYPE}" = "MRS" ] ; then
+                     TEMPLATE=$(getTemplate ${SIM} M-MGw mrs)
+                else
+                    TEMPLATE=$(getTemplate ${SIM} M-MGw mgw)
+                            fi
+                if [ $? -ne 0 ] ; then
+                    echo "ERROR: Failed to get template for ${SIM_TYPE} in sim ${SIM}"
+                    echo "${TEMPLATE}"
+                    removeTempFile ${SIM}
+                    exit 1
+                fi
+                if [[ ${ENABLE_STEP_COUNTER} == "true" ]]; then
+                    TEMPLATE=$(stepCounters ${TEMPLATE} ${ROP_START_TIME_UTC} ${ROP_END_TIME_UTC} ${SIM} ${SIM_TYPE})
+                fi
+
+                for MGW in ${MGW_LIST} ; do
+                    DEST_FILE="${OUT_ROOT}/${MGW}/${PMDIR}/${CPP_FILENAME}.gz"
+                    NEDN="SubNetwork=ONRM_ROOT_MO,MeContext=${MGW}"
+                    if [[ ${OSS_enabled} == "True" ]]; then
+                        OUT_PATH=${SIM_TYPE}_REALFILE_PATH
+                        MGW_FDN=${SIM_TYPE}_FDN_OSS
+                        NEDN=${!MGW_FDN//NODENAME/${MGW}}
+                        DEST_FILE="${!OUT_PATH}/${ECIM_FILENAME_PREFIX}${NEDN}_statsfile.xml.gz"
+
+                    fi
+                    cat ${TEMPLATE} | \
+                        sed -e "s/startdate/${STARTDATE_UTC}00Z/" \
+                            -e "s/stopdate/${ENDDATE_UTC}00Z/"  \
+                            -e "s/<sn><\/sn>/<sn>${NEDN}<\/sn>/g" \
+                            -e "s/<neun><\/neun>/<neun>${MGW}<\/neun>/g" \
+                            -e "s/<nedn><\/nedn>/<nedn>${NEDN}<\/nedn>/g" | \
+                            gzip -c > ${DEST_FILE}
+                    if [ ${OSS_enabled} == "True" ]; then
+                        MGW_FILE_COMPRESSION=${SIM_TYPE}_FILECOMPRESSION
+                        if [ ${!MGW_FILE_COMPRESSION} == "NO" ]; then
+                            gunzip -f ${DEST_FILE}
+                            DEST_FILE=`echo ${DEST_FILE%.*}`
+                        fi
+                        FILENAME=${DEST_FILE##*/}
+                        UPDATED_SIM=${SIM//-/_}
+                        LINK_DIR_PATH=${UPDATED_SIM}_LINK_DIR_OSS
+                        REAL_LINK_PATH=${UPDATED_SIM}_REAL_FILE_OSS
+                        linkFiles ${!REAL_LINK_PATH}${DEST_FILE} ${!LINK_DIR_PATH}/${FILENAME}
+                    fi
+                done
+
+            fi
+    else
+        if [[ "${SIM_TYPE}" = "GNODEBRADIO" ]]; then
+            if [[ ${TYPE} == "DO" ]] || [[ ${TYPE} == "MD_1" ]]; then
+                processEcimSim GNODEBRADIO ${SIM}
+            fi
+        elif [[ "${SIM_TYPE}" = "SPITFIRE" ]]; then
+            processEcimSim R6672 ${SIM}
+        elif [[ "${SIM_TYPE}" = "GSM_DG2" ]]; then
+            processEcimSim MSRBS-V2 ${SIM} gsm
+        elif [[ "${SIM_TYPE}" = "HSS" ]]; then
+            processEcimSim HSS-FE ${SIM}
+        elif [[ "${SIM_TYPE}" = "VBGF" ]]; then
+            processEcimSim MRSV ${SIM}
+        elif [[ "${SIM_TYPE}" = "VNSDS" ]] || [[ "${SIM_TYPE}" = "CONTROLLER6610" ]]; then
+            #Skipping 1 min ROP for VNSDS node & CONTROLLER6610 node
+            if [[ ${ROP_PERIOD_MIN} == 15 || ${EXEC_FROM_HC} == "YES" ]] && [[ ${TYPE} == "NSS" ]]; then
+                processEcimSim ${SIM_TYPE} ${SIM}
+            fi
+        elif [[ "${SIM_TYPE}" = "MRF" ]]; then
+            processEcimSim MRFV ${SIM}
+        elif [[ "${SIM_TYPE}" = "C608" ]]; then
+            processEcimSim TCU04 ${SIM}
+        else
+            processEcimSim ${SIM_TYPE} ${SIM}
+        fi
+    fi
+}
+
+runConcurrent() {
+    LOCK_FILE=$1
+    SIM=$2
+
+    processSim ${SIM}
+
+    rm -f ${LOCK_FILE}
+}
+
+
+processPCCnPCGSimForESOAFunctional(){
+
+  # Static location define
+  esoa_pcc_pcg_template_dir="/netsim_users/pms/xml_templates/PCC_PCG_ESOA/"
+  rop_syc_config_dir="/netsim_users/pms/etc/"
+
+  pcc_pcg_rop_time=$(generateFileName ${NETYPE} ${NE} ${XML_GZ_EXTENSION})
+  # Output Example : A20240422.0800+0100-0815+0100_SubNetwork=ESOA2.0LA,ManagedElement=PCC00S1011_statsfile.xml.gz
+
+  pcc_pcg_rop_time=$(echo ${pcc_pcg_rop_time} | awk -F'_' '{print $1}')
+  # Output Example : A20240422.0800+0100-0815+0100
+
+  pcc_pcg_time_sync_value=$(echo ${pcc_pcg_rop_time} | awk -F'+' '{print $1}' | awk -F'.' '{print $2}')
+  # Output Exmaple : 0800
+
+  # shellcheck disable=SC2045
+  for pcc_pcg_dir in $(ls ${esoa_pcc_pcg_template_dir}); do
+    # Expected Iteration : PCC_SMF, PCC_AMF, PCG_UPF
+
+    rop_sync_cofig_file="${rop_syc_config_dir}"
+    # Assigning value = /netsim_users/pms/etc/
+
+    if [[ ${pcc_pcg_dir} == "PCC_SMF" ]]; then
+      rop_sync_cofig_file="${rop_sync_cofig_file}PCC_ESOA.cfg"
+      # Assigning value = /netsim_users/pms/etc/PCC_ESOA.cfg
+
+    elif [[ ${pcc_pcg_dir} == "PCC_AMF" ]]; then
+      rop_sync_cofig_file="${rop_sync_cofig_file}PCC_AMF_ESOA.cfg"
+      # Assigning value = /netsim_users/pms/etc/PCC_AMF_ESOA.cfg
+
+    elif [[ ${pcc_pcg_dir} == "PCG_UPF" ]]; then
+      rop_sync_cofig_file="${rop_sync_cofig_file}PCG_ESOA.cfg"
+      # Assigning value = /netsim_users/pms/etc/PCG_ESOA.cfg
+
+    else
+      log "WARNING : Skipping Replay from ${esoa_pcc_pcg_template_dir}${pcc_pcg_dir} dir as it is not supported."
+      continue
+    fi
+
+    if [[ ! -f ${rop_sync_cofig_file} ]]; then
+      log "ERROR : Rop Sync config file ${rop_sync_cofig_file} not exists for ${pcc_pcg_dir}. Skipping generation."
+      continue
+    fi
+
+    pcc_pcg_temp_id=$(cat ${rop_sync_cofig_file} | grep "${pcc_pcg_time_sync_value}")
+    # Output Expected : <rop_value>|template<id>
+    if [[ -z ${pcc_pcg_temp_id} ]] || [[ ${pcc_pcg_temp_id} == "" ]] || [[ ${pcc_pcg_temp_id} == " " ]]; then
+      log "ERROR : Not able to find Template id from file ${rop_sync_cofig_file} for rop time ${pcc_pcg_time_sync_value}. Skipping generation."
+      continue
+    fi
+
+    pcc_pcg_temp_id=$(echo ${pcc_pcg_temp_id} | awk -F'|' '{print $2}')
+    # output expected : template<id>
+
+    pcc_pcg_src_file_list=($(ls ${esoa_pcc_pcg_template_dir}${pcc_pcg_dir}/ | grep "statsfile_${pcc_pcg_temp_id}.xml" ))
+    # output : list of files from /netsim_users/pms/xml_templates/PCC_PCG_ESOA/<PCC/PCG_dir>/ with matching template<id>
+
+    for my_pcc_pcg_template in ${pcc_pcg_src_file_list[*]}; do
+      pcc_pcg_src_full_path="${esoa_pcc_pcg_template_dir}${pcc_pcg_dir}/${my_pcc_pcg_template}"
+      pcc_pcg_dest_ne="SubNetwork=$(echo ${my_pcc_pcg_template} | awk -F'SubNetwork=' '{print $2}' | awk -F'_statsfile' '{print $1}')"
+      pcc_pcg_dest_dir="${OUT_ROOT}/${pcc_pcg_dest_ne}/${epoch_rop_folder}"
+      if [[ ! -d ${pcc_pcg_dest_dir} ]]; then
+        mkdir -p ${pcc_pcg_dest_dir}
+      fi
+      pcc_pcg_dest_file="${pcc_pcg_dest_dir}/${pcc_pcg_rop_time}_${pcc_pcg_dest_ne}_statsfile.xml"
+      if [[ ! -f "${pcc_pcg_dest_file}.gz" ]]; then
+                                cat "${pcc_pcg_src_full_path}" > "${pcc_pcg_dest_file}"
+                                        sed -i "s/beginTime=\"[^\"]*\"/${DO_ECIM_JOB_START_TIME_LOCAL}/" ${pcc_pcg_dest_file}
+                                        sed -i "s/endTime=\"[^\"]*\"/${DO_ECIM_JOB_END_TIME_LOCAL}/" ${pcc_pcg_dest_file}
+                                        sed -i 's/duration="[^"]\+"/'"${ECIM_JOB_DURATION}"'/g'  ${pcc_pcg_dest_file}
+                                gzip ${pcc_pcg_dest_file}
+                        fi
+    done
+  done
+}
+
+processPCCnPCGSimForESOA() {
+
+        local NETYPE=$1
+  local SIM_NAME=$2
+
+  MY_SIM_ID=$(echo ${SIM_NAME} | rev | awk -F'-' '{print $1}' | rev)
+
+        if [[ ${NETYPE} == "PCC" ]]; then
+                echo $SIM_NAME | grep "PCCAMF" > /dev/null
+                if [[ $? -eq 0 ]]; then
+                  NE_LIST=($(ls ${OUT_ROOT}/ | grep "${MY_SIM_ID}PCCAMF"))
+                        PCC_PCG_TEMPLATE_PATH="/netsim_users/pms/xml_templates/PCC_PCG_ESOA/PCC_AMF"
+                        PCC_PCG_ESOA_CONFIG="/netsim_users/pms/etc/PCC_AMF_ESOA.cfg"
+                else
+                  NE_LIST=($(ls ${OUT_ROOT}/ | grep -v "PCCAMF" | grep "${MY_SIM_ID}${NETYPE}"))
+                        PCC_PCG_TEMPLATE_PATH="/netsim_users/pms/xml_templates/PCC_PCG_ESOA/PCC_SMF"
+                        PCC_PCG_ESOA_CONFIG="/netsim_users/pms/etc/${NETYPE}_ESOA.cfg"
+                fi
+        else
+          NE_LIST=($(ls ${OUT_ROOT}/ | grep "${MY_SIM_ID}${NETYPE}"))
+                PCC_PCG_TEMPLATE_PATH="/netsim_users/pms/xml_templates/PCC_PCG_ESOA/PCG_UPF"
+                PCC_PCG_ESOA_CONFIG="/netsim_users/pms/etc/${NETYPE}_ESOA.cfg"
+        fi
+
+        if [[ ! -d ${PCC_PCG_TEMPLATE_PATH} ]]; then
+                log "ERROR : Template path ${PCC_PCG_TEMPLATE_PATH} not present. Skipping PM generation for sim ${SIM_NAME}"
+                return
+        fi
+
+        if [[ ! -f ${PCC_PCG_ESOA_CONFIG} ]]; then
+                log "ERROR : File ${PCC_PCG_ESOA_CONFIG} does not exist. Skipping file generation for SIM > ${SIM_NAME}"
+                return
+        fi
+
+  if [[ ! -z ${NE_LIST} ]] ; then
+
+    log "INFO : Processing SIM > ${SIM_NAME}"
+
+    FIRST_PCC_PCG_NE=$(echo ${NE_LIST[0]})
+    PCC_PCG_FILE_FORMAT=`generateFileName ${NETYPE} ${FIRST_PCC_PCG_NE} ${XML_GZ_EXTENSION}`
+    PCC_PCG_DEST_ROP_FULL_VALUE=$(echo ${PCC_PCG_FILE_FORMAT} | awk -F'_' '{print $1}')
+    PCC_PCG_ROP_TIME_VALUE=$(echo ${PCC_PCG_DEST_ROP_FULL_VALUE} | awk -F'+' '{print $1}' | awk -F'.' '{print $2}')
+    CONFIG_ROP_TIME_VALUE=$(cat ${PCC_PCG_ESOA_CONFIG} | grep "${PCC_PCG_ROP_TIME_VALUE}|" | awk -F'|' '{print $2}')
+    # shellcheck disable=SC2010
+    PCC_PCG_TEMPLATE_FILE=$(ls ${PCC_PCG_TEMPLATE_PATH}/ | grep "statsfile_${CONFIG_ROP_TIME_VALUE}.xml" | head -1)
+
+    if [[ $? -ne 0 ]]; then
+      log "ERROR : Source template file not present with template id : ${CONFIG_ROP_TIME_VALUE}, skipping PM generation for node > ${SIM_NAME}"
+      return
+    fi
+
+    PCC_PCG_TEMPLATE_FILE_PATH="${PCC_PCG_TEMPLATE_PATH}/${PCC_PCG_TEMPLATE_FILE}"
+
+    for NE in ${NE_LIST[*]} ; do
+                  short_NE=$(echo $NE | awk -F'=' '{print $4}')
+                  cat /tmp/showstartednodes.txt | grep $SIM_NAME | grep "$short_NE" > /dev/null
+      if [ $? -ne 0 ]; then
+        continue
+      fi
+
+                        PCC_PCG_OUT_FILE_PATH="${OUT_ROOT}/${NE}/${epoch_rop_folder}"
+
+                        if [[ ! -d ${PCC_PCG_OUT_FILE_PATH} ]]; then
+                                mkdir -p ${PCC_PCG_OUT_FILE_PATH}
+                        fi
+
+                        PCC_PCG_OUT_FILE="${PCC_PCG_OUT_FILE_PATH}/${PCC_PCG_DEST_ROP_FULL_VALUE}_${NE}.xml"
+
+                        if [[ ! -f "${PCC_PCG_OUT_FILE}.gz" ]]; then
+                                cat "${PCC_PCG_TEMPLATE_FILE_PATH}" > "${PCC_PCG_OUT_FILE}"
+                                        sed -i "s/beginTime=\"[^\"]*\"/${DO_ECIM_JOB_START_TIME_LOCAL}/" ${PCC_PCG_OUT_FILE}
+                                        sed -i "s/endTime=\"[^\"]*\"/${DO_ECIM_JOB_END_TIME_LOCAL}/" ${PCC_PCG_OUT_FILE}
+                                        sed -i 's/duration="[^"]\+"/'"${ECIM_JOB_DURATION}"'/g'  ${PCC_PCG_OUT_FILE}
+                                        sed -i 's/localDn="[^"]\+"/localDn="'"${NE}"'"/g'  ${PCC_PCG_OUT_FILE}
+                                gzip ${PCC_PCG_OUT_FILE}
+                        fi
+    done
+  fi
+}
+
+
+processPCCnPCGSim() {
+    local NETYPE=$1
+    local SIM_NAME=$2
+    NETYPE=$(echo $NETYPE | sed 's/-/_/g')
+
+    echo `ls ${OUT_ROOT} | grep ${SIM_NAME}` > /dev/null
+
+    if [ $? -eq 0 ] ; then
+
+            echo "Processing SIM : ${SIM_NAME}"
+
+            NE_LIST=`ls ${OUT_ROOT}/ | grep "${NETYPE}"`
+
+            for NE in ${NE_LIST} ; do
+                short_NE=$(echo $NE | awk -F'=' '{print $4}')
+                cat /tmp/showstartednodes.txt | grep $SIM_NAME | grep "$short_NE" > /dev/null
+
+                if [ $? -ne 0 ]; then
+                    continue
+                fi
+
+                if [[ $NETYPE = "PCC" ]];then
+                    TEMPLATE_FILE_NAME="PCC_node.xml.gz"
+                else
+                    TEMPLATE_FILE_NAME="PCG_node.xml.gz"
+                fi
+
+                Template=$(ls ${XML_TEMPLATE_DIR} | grep -i ${TEMPLATE_FILE_NAME})
+                # replaying 1 min template file on 15 min ROP for PCG in NSS
+                if [[ $NETYPE = "CIMS" ]]; then
+                    NE_FILENAME="${ECIM_FILENAME_PREFIX}${NE}${XML_EXTENSION}.gz"
+                elif [[ $NETYPE = "SHARED_CNF" ]];then
+                    NE_FILENAME=`generateFileName ${NETYPE} ${NE} ${XML_GZ_EXTENSION}`
+                else
+                    NE_FILENAME=`generateFileName ${NETYPE} ${NE} ${XML_GZ_EXTENSION}`
+                fi
+
+                if [[ $NETYPE = 'PCG' && ${ROP_PERIOD_MIN} == 15 && ${TYPE} == "NSS" ]] || [[ $NETYPE = 'SHARED_CNF' || $NETYPE = 'CIMS' ]]; then
+                    TEMPLATE="/pms_tmpfs/xml_step/xml_templates/1/${Template}"
+                    SOURCE_TEMPLATE="/netsim_users/pms/xml_templates/1/${Template}"
+                else
+                    TEMPLATE="${TEMPFS_XML_TEMPLATE_DIR}/${Template}"
+                    SOURCE_TEMPLATE="${XML_TEMPLATE_DIR}/${Template}"
+                fi
+
+                if  [ $? -eq 0 ] ; then
+                   if  [  ! -r ${TEMPLATE} ] ; then
+                        copySourceTemplates  ${SOURCE_TEMPLATE} ${TEMPLATE}
+                   fi
+                else
+                   log "ERROR: Default ${SOURCE_TEMPLATE} template not found.Hence cannot copy ${SOURCE_TEMPLATE} to  ${TEMPLATE}"
+                   return 1
+                fi
+
+                PM_FILE_LOCATION=`eval echo '$'${NETYPE}_PM_FileLocation`
+                OUTPUTDIR="${OUT_ROOT}/${NE}/${epoch_rop_folder}"
+
+                if [ ! -d "${OUTPUTDIR}" ] ; then
+                    mkdir $OUTPUTDIR
+                    #createOutputDir "${OUTPUTDIR}" "${SIM_NAME}"
+                fi
+
+                OUTPUTFILE="${OUTPUTDIR}/${NE_FILENAME}"
+                cp ${TEMPLATE} ${OUTPUTFILE}
+            done
+      fi
+}
+
+#Process UDM and SC sims
+process5GSim(){
+
+    NETYPE=$1
+    SIM_NAME=$2
+
+    echo `ls ${OUT_ROOT}` | grep ${SIM_NAME} > /dev/null
+
+    if [ $? -eq 0 ] ; then
+
+        echo "Processing SIM : ${SIM_NAME}"
+        # replaying a different template for SC 15 min ROP
+        if [[ $NETYPE = SC && ${ROP_PERIOD_MIN} == 15 && ${TYPE} != "DO" ]];then
+            TEMPATE_FILE_NAME="SC_only_node.xml.gz"
+        else
+            TEMPATE_FILE_NAME="UDM_SC_node.xml.gz"
+        fi
+
+        FIVEG_XML_TEMPLATE_DIR="/netsim_users/pms/xml_templates"
+        if [[ ${ROP_PERIOD_MIN} -ne 15 ]]; then
+            FIVEG_XML_TEMPLATE_DIR=${FIVEG_XML_TEMPLATE_DIR}/1/
+        else
+            FIVEG_XML_TEMPLATE_DIR=${FIVEG_XML_TEMPLATE_DIR}/15/
+        fi
+        Template=$(ls ${FIVEG_XML_TEMPLATE_DIR} | grep -i ${TEMPATE_FILE_NAME})
+
+        if [[ ${TYPE} == "DO" ]];then
+            TEMPLATE="/pms_tmpfs/xml_step/xml_templates/15/${Template}"
+            SOURCE_TEMPLATE="/netsim_users/pms/xml_templates/1/${Template}"
+        else
+            if [[ ${ROP_PERIOD_MIN} -ne 15 ]] || [[ ${ROP_PERIOD_MIN} -eq 15 && "$NETYPE" = "SMSF" ]]; then
+                TEMPLATE="/pms_tmpfs/xml_step/xml_templates/1/${Template}"
+                SOURCE_TEMPLATE="/netsim_users/pms/xml_templates/1/${Template}"
+            else
+                TEMPLATE="${TEMPFS_XML_TEMPLATE_DIR}/${Template}"
+                SOURCE_TEMPLATE="/netsim_users/pms/xml_templates/15/${Template}"
+            fi
+        fi
+
+        if  [ $? -eq 0 ] ; then
+          if  [  ! -r ${TEMPLATE} ] ; then
+          copySourceTemplates  ${SOURCE_TEMPLATE} ${TEMPLATE}
+          fi
+        else
+            log "ERROR: Default ${SOURCE_TEMPLATE} template not found. Hence cannot copy ${SOURCE_TEMPLATE} to  ${TEMPLATE}"
+            return 1
+        fi
+
+
+        PM_FILE_LOC=`eval echo '$'${NETYPE}_PM_FileLocation`
+
+        if [ ! -z "${SC_UDM_TZ}" ] ; then
+            ME_ID="1"
+            NE_FILENAME=`generateFileName "SC_UDM" ${ME_ID} ${XML_GZ_EXTENSION}`
+        else
+            NE_FILENAME="${ECIM_FILENAME_PREFIX}1${XML_EXTENSION}.gz"
+        fi
+
+        NE_LIST=`ls ${OUT_ROOT}/${SIM_NAME}`
+        for NE in ${NE_LIST} ; do
+
+            OUTPUTDIR="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_LOC}/"
+            if [ ! -d "${OUTPUTDIR}" ] ; then
+                createOutputDir "${OUTPUTDIR}" "${SIM_NAME}"
+            fi
+            OUTPUTFILE="${OUTPUTDIR}/${NE_FILENAME}"
+            if [[ "${TYPE}" == "DO" ]] && [[ "${NETYPE}" != "CCDM"  ]];then
+                zcat ${TEMPLATE} |  sed  -e "s/beginTime=\"2019-05-03T12:45:00+02:00\"/${DO_ECIM_JOB_START_TIME_LOCAL}/g" \
+                                         -e "s/endTime=\"2019-05-03T13:00:00+02:00\"/${DO_ECIM_JOB_END_TIME_LOCAL}/g" |  gzip -c > ${OUTPUTFILE}
+            else
+                cp ${TEMPLATE} ${OUTPUTFILE}
+            fi
+        done
+      fi
+}
+
+processEPGSim() {
+    NETYPE=$1
+    NETSIM_NETYPE=$2
+    SIM_NAME=$3
+
+    if [ -z "${EPG_FILE_TYPES}" ] ; then
+      EPG_FILE_TYPES="node pgw sgw"
+    fi
+
+    echo `ls ${OUT_ROOT}` | grep ${SIM_NAME} > /dev/null
+
+    if [ $? -eq 0 ] ; then
+
+            echo "Processing SIM : ${SIM_NAME}"
+            NODE_VER=`${BIN_DIR}/get_mim_ver --sim ${SIM_NAME} --netype ${NETSIM_NETYPE}`
+            if [ $? -ne 0 ] ; then
+                echo "ERROR: Failed to get $NETSIM_NETYPE NE version on the server"
+                return 1
+            fi
+
+            STARTDATE="${PMJOB_START_DATE_UTC}T${PMJOB_START_TIME_UTC}:00Z"
+            ENDDATE="${PMJOB_START_DATE_UTC}T${PMJOB_END_TIME_UTC}:00Z"
+
+            NE_TYPE=`echo ${NETYPE} | tr '[:upper:]' '[:lower:]'`
+
+            CORE_NE_LIST=`ls ${OUT_ROOT}/${SIM_NAME}`
+            if [[ ${EXEC_FROM_HC} == "YES" && $NETSIM_NETYPE == "EPG-SSR" ]];then
+               echo $CORE_NE_LIST
+            fi
+            for NE in ${CORE_NE_LIST} ; do
+
+                MANAGED_ELEMENT_ID=${NE}
+
+                    for EPG_TYPE in ${EPG_FILE_TYPES} ; do
+
+                        TEMPATE_FILE_NAME="${NE_TYPE}_counters_${EPG_TYPE}_${NODE_VER}.xml"
+                        Template=$(ls ${XML_TEMPLATE_DIR} | grep -i ${TEMPATE_FILE_NAME})
+                        TEMPLATE="${XML_TEMPLATE_DIR}/${Template}"
+                        if [ ! -f ${TEMPLATE} ] ; then
+                            TEMPATE_FILE_NAME="${NE_TYPE}_counters_${EPG_TYPE}_16B.xml"
+                            Template=$(ls ${XML_TEMPLATE_DIR} | grep -i ${TEMPATE_FILE_NAME})
+                            TEMPLATE="${XML_TEMPLATE_DIR}/${Template}"
+                            if [ ! -f ${TEMPLATE} ] ; then
+                                log "ERROR: Default ${TEMPLATE} template not found."
+                                return 1
+                            else
+                                log "WARN: ${TEMPLATE} not found. Default template will be used."
+                            fi
+                        fi
+
+                        if [ ! -z "${EPG_TZ}" ] ; then
+                            ME_ID="${MANAGED_ELEMENT_ID}_${EPG_TYPE}"
+                            NE_FILENAME=`generateFileName ${NETYPE} ${ME_ID} ${XML_GZ_EXTENSION}`
+                        else
+                            NE_FILENAME="${ECIM_FILENAME_PREFIX}${MANAGED_ELEMENT_ID}_${EPG_TYPE}${XML_EXTENSION}.gz"
+                        fi
+
+                        OUTPUTDIR="${OUT_ROOT}/${SIM_NAME}/${NE}/${EPG_PM_FileLocation}/"
+                        if [[ ${EXEC_FROM_HC} == "YES" && $NETSIM_NETYPE == "EPG-SSR" ]];then
+                           echo $OUTPUTDIR
+                        fi
+                        if [ ! -d "${OUTPUTDIR}" ] ; then
+                            createOutputDir "${OUTPUTDIR}" "${SIM_NAME}"
+                        fi
+                        OUTPUTFILE="${OUTPUTDIR}/${NE_FILENAME}"
+                        if [[ ${OSS_enabled} == "True" ]]; then
+                            UPDATED_NETYPE=${NETSIM_NETYPE//-/_}
+                            updateOssParams ${UPDATED_NETYPE} ${SIM_NAME} ${MANAGED_ELEMENT_ID}_${EPG_TYPE}
+                        fi
+                        # This is to handle the NRM3 requirement for 60K dployments specifically.
+                        # For NSS deployment the size of EPG files will remain less, for 60K it will
+                        # go to 15 MB per ROP
+                        if [ "${TYPE}" = "NSS" ];then
+
+                              cat ${TEMPLATE} |  sed -e "s/ManagedElement=1/ManagedElement=${MANAGED_ELEMENT_ID}/g" \
+                                               -e "s/${ECIM_JOB_BEGIN_TIME_DEFAULT}/${ECIM_JOB_START_TIME}/g" \
+                                               -e "s/${ECIM_JOB_END_TIME_DEFAULT}/${ECIM_JOB_END_TIME}/g" | \
+                                               gzip -c > ${OUTPUTFILE}
+                        else
+                            LINK_EPG_TEMPLATE_DIR=/pms_tmpfs/xml_step/epg_templates_NRM3
+                            NETSIM_EPG_TEMPLATE_DIR=/netsim/genstats/epg_templates_NRM3
+                            if [[ ! -d ${LINK_EPG_TEMPLATE_DIR} ]] ; then
+                               if [[ -d ${NETSIM_EPG_TEMPLATE_DIR} ]];then
+                                   mkdir -p ${LINK_EPG_TEMPLATE_DIR} ;
+                                   log "INFO : Copying EPG templates from ${NETSIM_EPG_TEMPLATE_DIR} to ${LINK_EPG_TEMPLATE_DIR}"
+                                   cp -rf ${NETSIM_EPG_TEMPLATE_DIR}/* ${LINK_EPG_TEMPLATE_DIR}/
+                               fi
+                            fi
+                            TEMPLATE="/pms_tmpfs/xml_step/epg_templates_NRM3/${TEMPATE_FILE_NAME}.gz"
+                            ln "${TEMPLATE}" "${OUTPUTFILE}"
+                        fi
+                        if [ ${OSS_enabled} == "True" ]; then
+                            if [[ ${FILE_COMP_NEEDED} == "NO" ]]; then
+                                gunzip -f ${OUTPUTFILE}
+                                OUTPUTFILE=`echo ${OUTPUTFILE%.*}`
+                                NE_FILENAME=`echo ${NE_FILENAME%.*}`
+                            fi
+                            linkFiles ${!REAL_LINK_PATH}${OUTPUTFILE} ${!LINK_DIR_PATH}/${NE_FILENAME}
+                        fi
+                    done
+            done
+      fi
+}
+
+
+# This method will update template to map with Topology Data
+processTopologyMapper(){
+
+    local sim_name=$1
+    local ne=$2
+    local do_template_list=$3
+    local node_type=$4
+
+    # Map with topology
+    id_num=$(cat ${NODE_TEMPLATE_MAP} | grep ${sim_name}| grep ${ne} | awk -F"|" '{print $3}')
+    for template in ${do_template_list[*]};do
+        if [[ $(echo ${template} | awk -F":" '{print $3}' | awk -F"_" '{print $1}') == ${id_num} ]];then
+            TEMPLATE=${template}
+        fi
+    done
+    log "INFO : Mapping Template file for SIM ${sim_name} :node ${NE} with Topology Data"
+    python ${TOPOLOGY_MAPPER} -t ${node_type} -s ${sim_name} -f ${TEMPLATE} -n ${ne}
+}
+
+
+# This method will return required Template and call stepCounter script
+getTemplateEcimSim(){
+
+    local sim_name=$1
+    local netype=$2
+    local template_file_name=$3
+
+    template=$(ls ${XML_TEMPLATE_DIR} | grep -i ${template_file_name})
+    TEMPLATE="${XML_TEMPLATE_DIR}/${template}"
+
+    if [[ ${TYPE} == "MD_1"  ]] ;then
+        echo ${MD_1_SUPPORTED_NE_TYPES} | grep -w "${NETYPE}" > /dev/null
+        if [[ $? -eq 0 ]];then
+           MD_1_TEMPLATE_PATH="/pms_tmpfs/xml_step/xml_templates/${ROP_PERIOD_MIN}"
+           TEMPLATE="${MD_1_TEMPLATE_PATH}/$(echo ${netype} | tr '[:upper:]' '[:lower:]')_md_1"
+           if [  ! -f ${TEMPLATE} ]; then
+              cp ${NETSIM_GENSTATS_XML_DIR}/15/"$(echo ${netype} | tr '[:upper:]' '[:lower:]')_md_1" /pms_tmpfs/xml_step/xml_templates/${ROP_PERIOD_MIN}/
+              if [ $? -ne 0 ];then
+                 log "ERROR : Copy of ${TEMPLATE} failed. File not available"
+               fi
+           fi
+
+        fi
+    fi
+
+    if [ ! -f ${TEMPLATE} ]; then
+        log "Cannot find template ${TEMPLATE}.Please check."
+        return 1
+    fi
+
+    if [[ ${TYPE} != "MD_1" ]];then
+        if [[ "${netype}" != "WMG" ]];then
+             if [[ ${ENABLE_STEP_COUNTER} == "true" ]]; then
+                 TEMPLATE=$(stepCounters ${TEMPLATE} ${ROP_START_TIME_UTC} ${ROP_END_TIME_UTC} ${sim_name} ${netype})
+             fi
+        fi
+    fi
+    if [ ! -f ${TEMPLATE} ] ; then
+        log "${TEMPLATE} not found"
+        return 1
+    fi
+}
+
+
+#This method is responsible for generation of CORE/GRAN Node stats file \
+
+processEcimSim() {
+
+    NETSIM_NETYPE=$1
+    SIM_LIST=$2
+    SIM_TYPE=$3
+
+    NETYPE=$(echo ${NETSIM_NETYPE} | sed 's/-/_/g')
+    NETYPE=$(echo ${NETYPE} | tr '[:lower:]' '[:upper:]')
+
+    if [[ "${NETSIM_NETYPE}" == "ESAPC" ]]; then
+        NETYPE="SAPC"
+    fi
+
+    if [[ "${NETYPE}" = "5GRADIONODE" ]]; then
+        ne_file_location="FIVEGRADIONODE"_PM_FileLocation
+    else
+        ne_file_location="${NETYPE}"_PM_FileLocation
+    fi
+
+    PM_FILE_DIR=${!ne_file_location}
+    if [ -z "${PM_FILE_DIR}" ] ; then
+        PM_FILE_DIR=${PMDIR}
+    fi
+
+    for SIM_NAME in ${SIM_LIST} ; do
+        if grep -q $SIM_NAME "/tmp/showstartednodes.txt"; then
+        log "INFO: Processing SIM : ${SIM_NAME}"
+        SIM_SHORT_NAME=""
+
+        echo `ls ${OUT_ROOT}` | grep ${SIM_NAME} > /dev/null
+        if [ $? -eq 0 ] ; then
+
+            if [ "${NETYPE}" = "MSRBS_V2" ]; then
+                NODE_VER=`${BIN_DIR}/get_mim_ver --sim ${SIM_NAME} --netype ${NETSIM_NETYPE} --isgransim YES`
+            elif [ "${NETYPE}" = "WMG" ] ; then
+                NODE_VER="16B"
+            elif [ "${NETYPE}" = "GNODEBRADIO" ]; then
+                NODE_VER=`${BIN_DIR}/get_mim_ver --sim ${SIM_NAME} --netype "MSRBS-V2" --isgransim YES`
+                SIM_SHORT_NAME=$(echo ${SIM_NAME} | rev | awk -F'-' '{print $1}' | rev)
+            else
+                NODE_VER=`${BIN_DIR}/get_mim_ver --sim ${SIM_NAME} --netype ${NETSIM_NETYPE}`
+            fi
+
+            if [ $? -ne 0 ] ; then
+                if [ "${NETYPE}" = "R6672" ] ; then
+                    NETSIM_NETYPE=SpitFire
+                    NETYPE=SPITFIRE
+                    NODE_VER=`${BIN_DIR}/get_mim_ver --sim ${SIM_NAME} --netype ${NETSIM_NETYPE}`
+                else
+                    echo "ERROR: Failed to get $NETSIM_NETYPE NE version on the server"
+                    return 1
+                fi
+            fi
+
+            DN_PREFIX="SubNetwork=ONRM_RootMo_R,SubNetwork=${NETYPE},MeContext="
+            if [ ${OSS_enabled} == "True" ]; then
+                PREFIX=${NETYPE}_FDN_OSS
+                DN_PREFIX=${!PREFIX}
+            fi
+
+            STARTDATE="${PMJOB_START_DATE_UTC}T${PMJOB_START_TIME_UTC}:00Z"
+            ENDDATE="${PMJOB_START_DATE_UTC}T${PMJOB_END_TIME_UTC}:00Z"
+
+            NE_TYPE=`echo ${NETYPE} | tr '[:upper:]' '[:lower:]'`
+            echo ${TOPOLOGY_SUPPORTED_DO_NETYPE} | grep -w ${NETYPE} > /dev/null
+                if [[ ${TYPE} == "DO" && $? -eq 0 ]];then
+                    DO_TEMPLATE_LIST=()
+                    echo ${DO_SUPPORTED_NETYPES} | grep -w ${NETYPE} > /dev/null
+                    if [[ $? -eq 0 ]];then
+                        TEMPLATE_ID_LIST=($(cat ${NODE_TEMPLATE_MAP} | grep ${SIM_NAME} | awk -F"|" '{print $3}'))
+                        for id in ${TEMPLATE_ID_LIST[*]};do
+                            if [ ! -z ${SIM_TYPE} ] ; then
+                                TEMPATE_FILE_NAME="${SIM_TYPE}_${NE_TYPE}_counters_${NODE_VER}:${SIM_NAME}:${id}.xml"
+                            else
+                                TEMPATE_FILE_NAME="${NE_TYPE}_counters_${NODE_VER}:${SIM_NAME}:${id}.xml"
+                            fi
+                            getTemplateEcimSim ${SIM_NAME} ${NETYPE} ${TEMPATE_FILE_NAME}
+                            if [ ! -f ${TEMPLATE} ] ; then
+                                echo "${TEMPLATE} not found"
+                                return 1
+                            else
+                                DO_TEMPLATE_LIST+=("${TEMPLATE}")
+                            fi
+                        done
+                    fi
+                else
+                    if [ ! -z ${SIM_TYPE} ] ; then
+                        TEMPATE_FILE_NAME="${SIM_TYPE}_${NE_TYPE}_counters_${NODE_VER}.xml"
+                    else
+                        TEMPATE_FILE_NAME="${NE_TYPE}_counters_${NODE_VER}.xml"
+                    fi
+
+                    if [[ ! -z ${SIM_SHORT_NAME} ]]; then
+                        TEMPATE_FILE_NAME="${TEMPATE_FILE_NAME/.xml/_${SIM_SHORT_NAME}.xml}"
+                    fi
+                    getTemplateEcimSim ${SIM_NAME} ${NETYPE} ${TEMPATE_FILE_NAME}
+
+                    if [ ! -f ${TEMPLATE} ] ; then
+                        echo "${TEMPLATE} not found"
+                        return 1
+                    fi
+                fi
+
+            # Get the CORE/GRAN Node List. For SGSN read from netsim sim dir
+            if [ "${NETYPE}" = "MSRBS_V2" ] ; then
+                CORE_NE_LIST=`ls ${OUT_ROOT}/${SIM_NAME} | grep MSRBS-V2`
+            else
+                CORE_NE_LIST=`ls ${OUT_ROOT}/${SIM_NAME}`
+            fi
+
+            if [[ ${ROP_PERIOD_MIN} == "1" ]] && [[ ${TYPE} != "NSS" ]]; then
+                echo ${SUPPORTED_SELECTIVE_FLEX_NE} | grep ${NETYPE} > /dev/null
+                if [[ $? -eq 0 ]]; then
+                    if [[ -f "${SELECTIVE_NE_CONF}" ]]; then
+                        SEARCH_STRING="${SIM_NAME}|${NETYPE}|${ROP_PERIOD_MIN}|"
+                        ENTRIES=$(cat ${SELECTIVE_NE_CONF} | grep "${SEARCH_STRING}" | wc -l)
+                        if [[ ${ENTRIES} == 0 ]]; then
+                            log "INFO: No configuration found for Selective NE in ${SELECTIVE_NE_CONF} file for information ${SEARCH_STRING}."
+                            continue
+                        elif [[ ${ENTRIES} -ge 2 ]]; then
+                            log "INFO: Multiple configuration found for Selective NE in ${SELECTIVE_NE_CONF} file for information ${SEARCH_STRING}. Skipping generation."
+                            continue
+                        fi
+                        SELECTIVE_CORE_NE_LIST=$(cat ${SELECTIVE_NE_CONF} | grep "${SEARCH_STRING}" | awk -F"|" '{print $5}')
+                        TEMP_CORE_NE_LIST=""
+                        for SINGLE_NE in ${SELECTIVE_CORE_NE_LIST}; do
+                            echo ${CORE_NE_LIST} | grep -w ${SINGLE_NE} > /dev/null
+                            if [[ $? -eq 0 ]]; then
+                                TEMP_CORE_NE_LIST="${TEMP_CORE_NE_LIST} ${SINGLE_NE}"
+                            fi
+                        done
+                        CORE_NE_LIST=${TEMP_CORE_NE_LIST}
+                    else
+                        log "WARNING: ${SELECTIVE_NE_CONF} does not exist. Skipping Selective Flex ROP generation for ${NETYPE} for ${SIM_NAME}."
+                        continue
+                    fi
+                fi
+            fi
+
+
+
+            # File compression needed for the generated file. Default value NO
+            FILE_COMP_NEEDED="NO"
+
+            for NE in ${CORE_NE_LIST}; do
+
+                # set managedElementId based on NE type
+                if [ "${NETYPE}" = "SPITFIRE" ] || [ "${NETYPE}" = "R6274" ] || [ "${NETYPE}" = "R6672" ] || [ "${NETYPE}" = "R6673" ] || [ "${NETYPE}" = "R6675" ] || [ "${NETYPE}" = "R6371" ] || [ "${NETYPE}" = "R6471_1" ] || [ "${NETYPE}" = "R6471_2" ] || [ "${NETYPE}" = "R6273" ]; then
+                    MANAGED_ELEMENT_ID="1"
+                    if [[ ${OSS_enabled} == "True" ]] && [[ "${NETYPE}" == "EME" ]] ; then
+                        MANAGED_ELEMENT_ID=${NE} #For OSSRC the EME managed element should be node name
+                    fi
+                else
+                    MANAGED_ELEMENT_ID=${NE}
+                fi
+
+                if [ "${NETYPE}" = "TCU03" ] || [ "${NETYPE}" = "TCU04" ] ; then
+
+                    if [ "${TCU_FILE_GEN_IN_UTC}" = "FALSE" ] ; then
+                        NE_FILENAME="${ECIM_FILENAME_PREFIX}${MANAGED_ELEMENT_ID}${XML_EXTENSION}.gz"
+                    else
+                        NE_FILENAME=`generateFileName ${NETYPE} ${MANAGED_ELEMENT_ID} ${XML_GZ_EXTENSION}`
+                    fi
+
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE_FILENAME}"
+                    FILE_COMP_NEEDED="YES"
+
+                elif [ "${NETYPE}" = "MSRBS_V2" ] || [ "${NETYPE}" = "GNODEBRADIO" ] ; then
+                    NE_FILENAME=`generateFileName "MSRBS_V2" ${MANAGED_ELEMENT_ID} ${XML_GZ_EXTENSION}`
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE_FILENAME}"
+                    FILE_COMP_NEEDED="YES"
+
+                elif [ "${NETYPE}" = "SGSN" ] ; then
+                    if [ ${ROP_PERIOD_MIN} == 1440 ];then
+                       ZER0=0000
+                       NE_FILENAME="A${MME_ROP_START_DATE_LOCAL}.${ZER0}${MME_ROP_LOCAL_START_OFFSET}-${MME_ROP_END_DATE_LOCAL}.${ZER0}${MME_ROP_LOCAL_END_OFFSET}_${MANAGED_ELEMENT_ID}${MME_JOB_GROUP_ID}${XML_EXTENSION}"
+                    else
+                       NE_FILENAME="A${MME_ROP_START_DATE_LOCAL}.${MME_ROP_START_TIME_LOCAL}${MME_ROP_LOCAL_START_OFFSET}-${MME_ROP_END_DATE_LOCAL}.${MME_ROP_END_TIME_LOCAL}${MME_ROP_LOCAL_END_OFFSET}_${MANAGED_ELEMENT_ID}${MME_JOB_GROUP_ID}${XML_EXTENSION}"
+                    fi
+                    # Check if real node file path mounting exists
+                    createOutputDir "${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/" "${SIM_NAME}"
+                    if [ "${MME_FILE_COMP_NEEDED}" = "YES" ] ; then
+                        FILE_COMP_NEEDED="YES"
+                        NE_FILENAME="${NE_FILENAME}.gz"
+                    fi
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE_FILENAME}"
+
+                elif [ "${NETYPE}" = "SPITFIRE" ] || [ "${NETYPE}" = "R6274" ] || [ "${NETYPE}" = "R6672" ] || [ "${NETYPE}" = "R6673" ] || [ "${NETYPE}" = "R6675" ] || [ "${NETYPE}" = "R6371" ] || [ "${NETYPE}" = "R6471_1" ] || [ "${NETYPE}" = "R6471_2" ] || [ "${NETYPE}" = "R6273" ]; then
+                    NE_FILENAME="A${ROUTER_ROP_START_DATE_LOCAL}.${ROUTER_ROP_START_TIME_LOCAL}${ROUTER_ROP_LOCAL_OFFSET}-${ROUTER_ROP_END_TIME_LOCAL}${ROUTER_ROP_LOCAL_END_OFFSET}${XML_EXTENSION}.gz"
+                    FILE_COMP_NEEDED="YES"
+                    # Check if real node file path mounting exists
+                    createOutputDir "${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/" "${SIM_NAME}"
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE_FILENAME}"
+
+                elif [ "${NETYPE}" = "SAPC" ] || [ "${NETYPE}" = "VSAPC" ] ; then
+
+                    NE_FILENAME="${ECIM_FILENAME_PREFIX}${MANAGED_ELEMENT_ID}${XML_EXTENSION}.gz"
+                    FILE_COMP_NEEDED="YES"
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE_FILENAME}"
+
+                elif [ "${NETYPE}" = "MTAS" ] || [ "${NETYPE}" = "CSCF" ] || [ "${NETYPE}" = "SBG" ] || [ "${NETYPE}" = "VSBG" ]; then
+
+                    NE_FILENAME=`generateFileName ${NETYPE} ${MANAGED_ELEMENT_ID} ${XML_GZ_EXTENSION}`
+                    FILE_COMP_NEEDED="YES"
+                    createOutputDir "${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/" "${SIM_NAME}"
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE_FILENAME}"
+
+                elif [ "${NETYPE}" = "VNSDS" ] || [ "${NETYPE}" = "CONTROLLER6610" ]; then
+                    NE_FILENAME=`generateFileName ${NETYPE} ${MANAGED_ELEMENT_ID} ${XML_GZ_EXTENSION}`
+                    FILE_COMP_NEEDED="YES"
+                    createOutputDir "${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/" "${SIM_NAME}"
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE_FILENAME}"
+
+                elif [ "${NETYPE}" = "WCG" ] || [ "${NETYPE}" = "UPG" ]; then
+                    NE_FILENAME=`generateFileName ${NETYPE} ${MANAGED_ELEMENT_ID} ${XML_GZ_EXTENSION}`
+                    FILE_COMP_NEEDED="YES"
+                    createOutputDir "${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/" "${SIM_NAME}"
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE_FILENAME}"
+
+                elif [ "${NETYPE}" = "HSS_FE" ] ; then
+                    NE_FILENAME=`generateFileName ${NETYPE} ${MANAGED_ELEMENT_ID} ${XML_GZ_EXTENSION}`
+                    FILE_COMP_NEEDED="YES"
+                    createOutputDir "${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/" "${SIM_NAME}"
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE_FILENAME}"
+
+                elif [ "${NETYPE}" = "RNNODE" ] || [ "${NETYPE}" = "VPP" ] || [ "${NETYPE}" = "VRC" ] || [ "${NETYPE}" = "VTFRADIONODE" ] || [ "${NETYPE}" = "5GRADIONODE" ] || [ "${NETYPE}" = "VTIF" ] ; then
+                    NE_FILENAME=`generateFileName ${NETYPE} ${MANAGED_ELEMENT_ID} ${XML_GZ_EXTENSION}`
+                    FILE_COMP_NEEDED="YES"
+                    createOutputDir "${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/" "${SIM_NAME}"
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE_FILENAME}"
+                elif [ "${NETYPE}" = "MRSV" ] || [ "${NETYPE}" = "IPWORKS" ] || [ "${NETYPE}" = "MRFV" ] || [ "${NETYPE}" = "EME" ]; then
+                    NE_FILENAME=`generateFileName ${NETYPE} ${MANAGED_ELEMENT_ID} ${XML_GZ_EXTENSION}`
+                    FILE_COMP_NEEDED="YES"
+                    createOutputDir "${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/" "${SIM_NAME}"
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE_FILENAME}"
+
+                elif [ "${NETYPE}" = "DSC" ]; then
+                    NE_FILENAME=`generateFileName ${NETYPE} ${MANAGED_ELEMENT_ID} ${XML_EXTENSION}`
+                    FILE_COMP_NEEDED="NO"
+                    createOutputDir "${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/" "${SIM_NAME}"
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE_FILENAME}"
+
+                elif [ "${NETYPE}" = "WMG" ]; then
+                    WMG="_wmg"
+                    MANAGED_ELEMENT_ID_UPDATED=${MANAGED_ELEMENT_ID}${WMG}
+                    NE_FILENAME=`generateFileName ${NETYPE} ${MANAGED_ELEMENT_ID_UPDATED} ${XML_GZ_EXTENSION}`
+                    FILE_COMP_NEEDED="YES"
+                    createOutputDir "${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/" "${SIM_NAME}"
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE_FILENAME}"
+
+                else
+                    NE_FILENAME="${ECIM_FILENAME_PREFIX}${MANAGED_ELEMENT_ID}${XML_EXTENSION}"
+                    OUTPUTFILE="${OUT_ROOT}/${SIM_NAME}/${NE}/${PMDIR}/${NE_FILENAME}"
+                fi
+                if [[ ${OSS_enabled} == "True" ]]; then
+                     updateOssParams ${NETYPE} ${SIM_NAME} ${MANAGED_ELEMENT_ID}
+                fi
+
+                DN=${DN_PREFIX}${MANAGED_ELEMENT_ID}
+
+                if [ ${OSS_enabled} != "True" ]; then
+                    if [ "${NETYPE}" = "SPITFIRE" ] || [ "${NETYPE}" = "R6274" ] || [ "${NETYPE}" = "R6672" ] || [ "${NETYPE}" = "R6675" ] || [ "${NETYPE}" = "R6371" ] || [ "${NETYPE}" = "R6471_1" ] || [ "${NETYPE}" = "R6471_2" ]; then
+                        DN=""
+                    fi
+                fi
+
+                if [[ ${TYPE} == "DO" ]];then
+                    echo ${DO_SUPPORTED_NETYPES} | grep -w "${NETYPE}" > /dev/null
+                    if [[ $? -eq 0 ]];then
+                       echo ${TOPOLOGY_SUPPORTED_DO_NETYPE} | grep -w "${NETYPE}" > /dev/null
+                        if [ $? -eq  0 ] ;then
+                        # Map with topology
+                         processTopologyMapper "${SIM_NAME}" "${NE}" "${DO_TEMPLATE_LIST[*]}" "${NETYPE}"
+                        fi
+                    fi
+                elif [[ ${TYPE} == "MD_1" ]];then
+                    echo ${MD_1_SUPPORTED_NE_TYPES} | grep -w "${NETYPE}" > /dev/null
+                    if [[ $? -eq 0 ]];then
+                        linkFiles ${TEMPLATE} ${OUTPUTFILE}
+                        continue
+                    fi
+                fi
+
+                if [ "${FILE_COMP_NEEDED}" = "NO" ] ; then
+                       if [ "${NETYPE}" = "SGSN" ] ; then
+                            # check for DO NRM
+                            if [[ ${TYPE} == "DO" ]]; then
+                                # Update Template
+                                cat ${TEMPLATE} |  sed -e "s/nodeName/${MANAGED_ELEMENT_ID}/" \
+                                                   -e "s/\"dnPrefix\"/\"${DN}\"/" \
+                                                   -e "s/ManagedElement=1/ManagedElement=${MANAGED_ELEMENT_ID}/g" \
+                                                   -e "s/AmfFunction\"/AmfFunction=1\"/g" \
+                                                   -e "s/${ECIM_JOB_BEGIN_TIME_DEFAULT}/${MME_ECIM_JOB_START_TIME_LOCAL}/g" \
+                                                   -e "s/${ECIM_JOB_END_TIME_DEFAULT}/${MME_ECIM_JOB_END_TIME_LOCAL}/g" \
+                                                   -e "s/${ECIM_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" \
+                                                   -e "s/${MSRBS_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" > ${OUTPUTFILE}
+                            # For environment other than DO NRM
+                            else
+                                cat ${TEMPLATE} |  sed -e "s/nodeName/${MANAGED_ELEMENT_ID}/" \
+                                               -e "s/\"dnPrefix\"/\"${DN}\"/" \
+                                               -e "s/ManagedElement=1/ManagedElement=${MANAGED_ELEMENT_ID}/g" \
+                                               -e "s/${ECIM_JOB_BEGIN_TIME_DEFAULT}/${MME_ECIM_JOB_START_TIME_LOCAL}/g" \
+                                               -e "s/${ECIM_JOB_END_TIME_DEFAULT}/${MME_ECIM_JOB_END_TIME_LOCAL}/g" \
+                                               -e "s/${ECIM_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" \
+                                               -e "s/${MSRBS_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" > ${OUTPUTFILE}
+                            fi
+                        else
+                            cat ${TEMPLATE} |  sed -e "s/\"dnPrefix\"/\"${DN}\"/" \
+                                               -e "s/ManagedElement=1/ManagedElement=${MANAGED_ELEMENT_ID}/g" \
+                                               -e "s/${ECIM_JOB_BEGIN_TIME_DEFAULT}/${ECIM_JOB_START_TIME}/g" \
+                                               -e "s/${ECIM_JOB_END_TIME_DEFAULT}/${ECIM_JOB_END_TIME}/g" \
+                                               -e "s/${ECIM_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" \
+                                               -e "s/${MSRBS_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" > ${OUTPUTFILE}
+                        fi
+                        if [ ${OSS_enabled} == "True" ]; then
+                            linkFiles ${!REAL_LINK_PATH}${OUTPUTFILE} ${!LINK_DIR_PATH}/${NE_FILENAME}
+                        fi
+                    else
+                        if [[ "${NETYPE}" = "SGSN" ]];then
+                            # Check for DO NRM
+                            if [[ ${TYPE} == "DO" ]]; then
+                                # Update Template
+                                cat ${TEMPLATE} |  sed -e "s/nodeName/${MANAGED_ELEMENT_ID}/" \
+                                               -e "s/\"dnPrefix\"/\"${DN}\"/" \
+                                               -e "s/ManagedElement=1/ManagedElement=${MANAGED_ELEMENT_ID}/g" \
+                                               -e "s/AmfFunction\"/AmfFunction=1\"/g" \
+                                               -e "s/${ECIM_JOB_BEGIN_TIME_DEFAULT}/${MME_ECIM_JOB_START_TIME_LOCAL}/g" \
+                                               -e "s/${ECIM_JOB_END_TIME_DEFAULT}/${MME_ECIM_JOB_END_TIME_LOCAL}/g" \
+                                               -e "s/${ECIM_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" \
+                                               -e "s/${MSRBS_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" | \
+                                               gzip -c > ${OUTPUTFILE}
+                            # For environment other than DO NRM
+                            else
+                                cat ${TEMPLATE} |  sed -e "s/nodeName/${MANAGED_ELEMENT_ID}/" \
+                                               -e "s/\"dnPrefix\"/\"${DN}\"/" \
+                                               -e "s/ManagedElement=1/ManagedElement=${MANAGED_ELEMENT_ID}/g" \
+                                               -e "s/${ECIM_JOB_BEGIN_TIME_DEFAULT}/${MME_ECIM_JOB_START_TIME_LOCAL}/g" \
+                                               -e "s/${ECIM_JOB_END_TIME_DEFAULT}/${MME_ECIM_JOB_END_TIME_LOCAL}/g" \
+                                               -e "s/${ECIM_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" \
+                                               -e "s/${MSRBS_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" | \
+                                               gzip -c > ${OUTPUTFILE}
+                            fi
+                        else
+                            cat ${TEMPLATE} |  sed -e "s/\"dnPrefix\"/\"${DN}\"/" \
+                                               -e "s/ManagedElement=1/ManagedElement=${MANAGED_ELEMENT_ID}/g" \
+                                               -e "s/${ECIM_JOB_BEGIN_TIME_DEFAULT}/${ECIM_JOB_START_TIME}/g" \
+                                               -e "s/${ECIM_JOB_END_TIME_DEFAULT}/${ECIM_JOB_END_TIME}/g" \
+                                               -e "s/${ECIM_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" \
+                                               -e "s/${MSRBS_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" \
+                                               -e "s/${NR_CELL_CU}/,NRCellCU=${MANAGED_ELEMENT_ID}-/g" \
+                                               -e "s/${NR_CELL_DU}/,NRCellDU=${MANAGED_ELEMENT_ID}-/g" | \
+                                               gzip -c > ${OUTPUTFILE}
+
+                        fi
+                        if [ ${OSS_enabled} == "True" ]; then
+                            linkFiles ${!REAL_LINK_PATH}${OUTPUTFILE} ${!LINK_DIR_PATH}/${NE_FILENAME}
+                        fi
+                    fi
+                done
+            fi
+        fi
+    done
+}
+
+#This method is responsible to invoke process for ROP Generation of Transport Nodes.
+processTransportNodes(){
+
+   SIM=$1
+
+   TRANSPORT_TEMPLATE_DIR=`cd ${BIN_DIR} ; cd ../bcp_templates ; pwd`
+
+   log "CURRENT ROP TIMESTAMP for Transport NE Type :"${TRANSPORT_NE_CURRENT_DATE_TIME_IN_MINUTES}
+
+    if [[ ${SIM} == *"TCU02"* || ${SIM} == *"SIU02"* ]]; then
+        TRANSPORT_INPUT_DIR=${TRANSPORT_TEMPLATE_DIR}/${ROP_PERIOD_MIN}_${SIM}
+        if [ ! -d ${TRANSPORT_INPUT_DIR} ];then
+            mkdir ${TRANSPORT_INPUT_DIR}
+        fi
+        processTransportSim ${SIM} ${TRANSPORT_INPUT_DIR}
+    else
+        ESC_SCU_TMPS_TEMPLATE_DIR=/pms_tmpfs/xml_step/esc_scu_templates
+        TRANSPORT_INPUT_DIR=${ESC_SCU_TMPS_TEMPLATE_DIR}/${ROP_PERIOD_MIN}_${SIM}
+        if [ ! -d ${TRANSPORT_INPUT_DIR} ];then
+            mkdir -p ${TRANSPORT_INPUT_DIR}
+        fi
+        processECSSim ${SIM} ${TRANSPORT_INPUT_DIR}
+    fi
+
+    if [ $? -ne 0 ] ; then
+        log "WARN: ROP generation failed for Sim: ${SIM}"
+    fi
+}
+
+#This method is responsible for ROP generation of Stats file for Transport Nodes.
+processTransportSim(){
+
+    SIM_NAME=$1
+    TRANSPORT_INPUT_DIR=$2
+    log "Processing SIM : ${SIM_NAME}"
+
+    TEMPLATE_TRANSPORT_ADMIN_INPUT_DIR=${TRANSPORT_TEMPLATE_DIR}/${TRANSPORT_ADMIN_DIR}
+    TEMPLATE_TRANSPORT_DATA_INPUT_DIR=${TRANSPORT_TEMPLATE_DIR}/${TRANSPORT_DATA_DIR}
+    TEMPLATE_TRANSPORT_SEMAPHORE_INPUT_DIR=${TRANSPORT_TEMPLATE_DIR}/${TRANSPORT_SEMAPHORE_DIR}
+    RANDOM_NE_ID=2147488648
+
+    if [ ${ROP_PERIOD_MIN} -eq 1 ] ;then
+        RANDOM_NE_ID=`awk -v min=10000 -v max=2147488647 'BEGIN{srand(); print int(min+rand()*(max-min+1))}'`
+    else
+        RANDOM_NE_ID=`awk -v min=2147488648 -v max=4294967295 'BEGIN{srand(); print int(min+rand()*(max-min+1))}'`
+    fi
+
+    echo `ls ${OUT_ROOT}` | grep ${SIM_NAME} > /dev/null
+
+    #Creating output directories and copy template files (DATA, ADMIN and SEMAPHORE) for each NE
+    if [ $? -eq 0 ] ; then
+       CORE_NE_LIST=`ls ${OUT_ROOT}/${SIM_NAME}`
+       if [[ ${ROP_PERIOD_MIN} -eq 15 ]];then
+           sleep 3;
+       fi
+       if [[ ! -z ${CORE_NE_LIST} ]]; then
+           if [[ -d "${TRANSPORT_INPUT_DIR}" ]]; then
+               rm -f ${TRANSPORT_INPUT_DIR}/*
+               copyTransportStatasticTemplates ${TEMPLATE_TRANSPORT_ADMIN_INPUT_DIR} ${TRANSPORT_INPUT_DIR} ${TRANSPORT_NE_CURRENT_DATE_TIME_IN_MINUTES} ${ROP_PERIOD_MIN}
+               copyTransportStatasticTemplates ${TEMPLATE_TRANSPORT_DATA_INPUT_DIR} ${TRANSPORT_INPUT_DIR} ${TRANSPORT_NE_CURRENT_DATE_TIME_IN_MINUTES} ${ROP_PERIOD_MIN}
+               copyTransportStatasticTemplates ${TEMPLATE_TRANSPORT_SEMAPHORE_INPUT_DIR} ${TRANSPORT_INPUT_DIR} ${TRANSPORT_NE_CURRENT_DATE_TIME_IN_MINUTES} ${ROP_PERIOD_MIN}
+           else
+               log "ERROR: Directory ${TRANSPORT_INPUT_DIR} not exists."
+           fi
+           for NE in $CORE_NE_LIST; do
+               for file in `ls ${TRANSPORT_INPUT_DIR}`; do
+                   cat ${TRANSPORT_INPUT_DIR}/${file} | sed "s/NEID/${RANDOM_NE_ID}/g" | sed "s/DATE/${TRANSPORT_NE_CURRENT_DATE_TIME_IN_MINUTES}/g" | sed "s/ROP/${ROP_PERIOD_MIN}/g" | sed "s/NODE/${NE}/g" > ${OUT_ROOT}/${SIM_NAME}/${NE}/${PMDIR}/${file}
+               done
+           done
+       else
+           log "WARN: Node list is empty for Sim: ${SIM_NAME} for ROP generation."
+       fi
+
+    else
+        log "WARN: Sim: ${SIM_NAME} is not available for ROP generation at location ${OUT_ROOT}."
+    fi
+}
+
+#This method is used to generate files for ESC nodes
+processECSSim(){
+    SIM_NAME=$1
+    TRANSPORT_INPUT_DIR=$2
+
+    log "Processing SIM : ${SIM_NAME}"
+
+    TEMPLATE_TRANSPORT_DATA_INPUT_DIR=${ESC_SCU_TMPS_TEMPLATE_DIR}/${TRANSPORT_DATA_ECS_DIR}
+    TEMPLATE_TRANSPORT_SEMAPHORE_INPUT_DIR=${ESC_SCU_TMPS_TEMPLATE_DIR}/${TRANSPORT_SEMAPHORE_ECS_DIR}
+
+    echo `ls ${OUT_ROOT}` | grep ${SIM_NAME} > /dev/null
+
+    #Creating output directories and copy template files (DATA and SEMAPHORE) for each NE
+    if [ $? -eq 0 ] ; then
+       CORE_NE_LIST=`ls ${OUT_ROOT}/${SIM_NAME}`
+       if [[ ${ROP_PERIOD_MIN} -eq 15 ]];then
+           sleep 2;
+       fi
+
+       if [[ ! -z ${CORE_NE_LIST} ]]; then
+               for NE in ${CORE_NE_LIST}; do
+               if [[ -d "${TRANSPORT_INPUT_DIR}" ]]; then
+                   rm -f ${TRANSPORT_INPUT_DIR}/*
+                   copyTransportStatasticTemplates ${TEMPLATE_TRANSPORT_DATA_INPUT_DIR} ${TRANSPORT_INPUT_DIR} ${TRANSPORT_NE_CURRENT_DATE_TIME_IN_MINUTES} ${ROP_PERIOD_MIN} ${NE} ${SIM_NAME}
+                   copyTransportStatasticTemplates ${TEMPLATE_TRANSPORT_SEMAPHORE_INPUT_DIR} ${TRANSPORT_INPUT_DIR} ${TRANSPORT_NE_CURRENT_DATE_TIME_IN_MINUTES} ${ROP_PERIOD_MIN} ${NE} ${SIM_NAME}
+               else
+                   log "ERROR: Directory ${TRANSPORT_INPUT_DIR} not exists."
+               fi
+
+               for file in `ls ${TRANSPORT_INPUT_DIR}`; do
+                   new_file_name="${file}"
+                   if [[ ${ROP_PERIOD_MIN} -eq 1 ]]; then
+                       if [[ ${new_file_name} == *".xml"* ]]; then
+                           new_file_name=`echo ${file} | sed 's/.xml//g'`
+                           new_file_name="${new_file_name}_${ROP_PERIOD_MIN}.xml"
+                       else
+                           new_file_name="${new_file_name}_${ROP_PERIOD_MIN}"
+                       fi
+                   fi
+                   cat ${TRANSPORT_INPUT_DIR}/${file} | sed "s/elementType=\".*\"/elementType=\"${NE}\"/g" | sed "s/beginTime=\".*\"/beginTime=\"${BEGIN_ECS_TIME}\"/g" | sed "s/duration=\(".*"\) endTime/duration=\"${ECS_ROP_PERIOD}\" endTime/g" | sed "s/endTime=\".*\"/endTime=\"${END_ECS_TIME}\"/g" | sed "s/userLabel=\".*\"/userLabel=\"${NE}\"/g" > ${OUT_ROOT}/${SIM_NAME}/${NE}/${PMDIR}/${new_file_name}
+               done
+           done
+       else
+           log "WARN: Node list is empty for Sim: ${SIM_NAME} for ROP generation."
+       fi
+    else
+        log "WARN: Sim: ${SIM_NAME} is not available for ROP generation at location ${OUT_ROOT}."
+    fi
+
+}
+
+copyTransportStatasticTemplates(){
+
+    source_dir=$1
+    dest_dir=$2
+    trans_date=$3
+    trans_rop=$4
+    node_name=$5
+    sim_name=$6
+
+    filtered_sim_name=`echo $sim_name | egrep "ERSN|ERS[-_]SN[-_]ESC|ERS[-_]SN[-_]SCU|SCU[-_]"`
+    supported_version_list="R9A R13A R17B R18D R19B 21-Q1-V1"
+    for version in $supported_version_list; do
+        if [[ $filtered_sim_name == *"$version"* ]] ;then
+            # replaying R19B template for SCU-21-Q1-V1
+            if [[ $filtered_sim_name == *"21-Q1-V1"* ]] ;then
+               version_dir=R19B
+            else
+                version_dir=${version}
+            fi
+        fi
+    done
+
+    if [[ ${source_dir} == *"${TRANSPORT_DATA_ECS_DIR}"* ]]; then
+        if [[ $version_dir == "" ]] || [[ $filtered_sim_name == *"ERSN"* ]]; then
+            check_source_exists ${source_dir}/default
+            filtered_source_dir=${source_dir}/default
+        # point to SCU R19B template for SCU-21
+        elif [[ $filtered_sim_name == *"ERS-SN-SCU"* ]] || [[ $filtered_sim_name == *"SCU-"* ]]; then
+            check_source_exists ${source_dir}/SCU/${version_dir} ${version_dir}
+            filtered_source_dir=${source_dir}/SCU/${version_dir}
+        elif [[ $sim_name == *"ERS-SN-ESC"* ]]; then
+            check_source_exists ${source_dir}/ESC/${version_dir} ${version_dir}
+            filtered_source_dir=${source_dir}/ESC/${version_dir}
+        fi
+    elif [[ $source_dir == *"${TRANSPORT_SEMAPHORE_ECS_DIR}"* ]];then
+        check_source_exists ${source_dir}
+        filtered_source_dir=${source_dir}
+    else
+        filtered_source_dir=${source_dir}
+    fi
+
+    for source_file in `ls ${filtered_source_dir}`
+    do
+        new_dest_file="${source_file/DATE/${trans_date}}"
+        new_dest_file="${new_dest_file/ROP/${trans_rop}}"
+        new_dest_file="${new_dest_file/NODE/${node_name}}"
+
+        cp -f ${filtered_source_dir}/${source_file} ${dest_dir}/${new_dest_file}
+    done
+
+}
+
+# This method checks if the input directory or file exists and attempts a copy from recording files if the file does not exists.
+check_source_exists(){
+    check_source_dir=$1
+    version_dir=$2
+    check_source_file=${check_source_dir}/SDN_NODE_DATE*
+
+    if [[ ! -d ${check_source_dir} ]]; then
+        mkdir -p ${check_source_dir}
+    fi
+    if ! ls ${check_source_file} 1> /dev/null 2>&1; then
+        log "WARNING : Template file '${check_source_file}' does not exist, attempting to copy to location."
+        if [[ ${check_source_dir} == *"semaphore_ecs_dir"* ]];then
+            cp -r -f ${BCP_RECORDING_FILES_LOCATION}/${TRANSPORT_SEMAPHORE_ECS_DIR}/* ${check_source_dir}/
+        elif [[ ${check_source_dir} == *"ESC"* ]];then
+            cp -r -f ${BCP_RECORDING_FILES_LOCATION}/${TRANSPORT_DATA_ECS_DIR}/ESC/${version_dir}/* ${check_source_dir}/
+        elif  [[ ${check_source_dir} == *"SCU"* ]]; then
+            cp -r -f ${BCP_RECORDING_FILES_LOCATION}/${TRANSPORT_DATA_ECS_DIR}/SCU/${version_dir}/* ${check_source_dir}/
+        else
+            cp -r -f ${BCP_RECORDING_FILES_LOCATION}/${TRANSPORT_DATA_ECS_DIR}/default/* ${check_source_dir}/
+        fi
+
+        if [[ $? -ne 0 ]]; then
+            log "ERROR : Template copy to '${check_source_dir}' failed."
+        fi
+    fi
+}
+
+# This method replace the value in the file and copy it on destination location /pms_tmpfs/<sim>/<node>/c/pm_data
+updateMiniLinkFile(){
+
+    ml_sim=$1
+    ml_node=$2
+    MINILINK_OUTPUT_FILE=$3
+    SAMPLE_FILENAME=$4
+    typeOfFile=$5
+    DIR_NAME=$6
+    MINILINK_NEW_BEGIN_TIME=$7
+    MINILINK_NEW_END_TIME=$8
+    LOCAL_DN=$9
+    USER_LABEL=${10}
+
+    HEADER_XML_FILE="${MINILINK_TEMPLATE_DIR}/${DIR_NAME}/HeaderSample.xml"
+    FOOTER_XML_FILE="${MINILINK_TEMPLATE_DIR}/${DIR_NAME}/FooterSample.xml"
+    LOCAL_DN="localDn=\"NE=${LOCAL_DN}\""
+    USER_LABEL="userLabel=\"${USER_LABEL}\""
+
+    MINILINK_FILEPATH="${MINILINK_TEMPLATE_DIR}/${DIR_NAME}/${MINILINK_OUTPUT_FILE}"
+
+    gunzip -c "${MINILINK_TEMPLATE_DIR}/${SAMPLE_FILENAME}" > ${MINILINK_FILEPATH}
+
+
+    gunzip -c "${MINILINK_TEMPLATE_DIR}/HeaderSample.xml.gz" > ${HEADER_XML_FILE}
+
+    gunzip -c "${MINILINK_TEMPLATE_DIR}/FooterSample.xml.gz" > ${FOOTER_XML_FILE}
+
+    sed -i "s/${MINILINK_LOCAL_DN_DEFAULT}/${LOCAL_DN}/g" ${HEADER_XML_FILE}
+    sed -i "s/${MINILINK_JOB_BEGIN_TIME_DEFAULT}/${MINILINK_NEW_BEGIN_TIME}/g" ${HEADER_XML_FILE}
+    sed -i "s/${MINILINK_USER_LABEL_DEFAULT}/${USER_LABEL}/g" ${HEADER_XML_FILE}
+
+    sed -i "s/${MINILINK_JOB_END_TIME_DEFAULT}/${MINILINK_NEW_END_TIME}/g" ${FOOTER_XML_FILE}
+
+    if [ ${typeOfFile} == "C" ]; then
+
+        beginTimeStamp=$(echo ${MINILINK_NEW_BEGIN_TIME} | cut -d"=" -f2)
+        endTimeStamp=$(echo ${MINILINK_NEW_END_TIME} | cut -d"=" -f2)
+
+        beginTime=$(echo ${beginTimeStamp} | cut -c13-20 | sed 's/://g' )
+        beginTime2=$(echo ${beginTimeStamp} | cut -c13-20)
+        beginDate=$(echo ${beginTimeStamp} | cut -c2-11)
+        beginOffset=$(echo ${beginTimeStamp} | cut -c21-26)
+        endDate=$(echo ${endTimeStamp} | cut -c2-11)
+        endTime=$(echo ${endTimeStamp} | cut -c13-20)
+        endOffset=$(echo ${endTimeStamp} | cut -c21-26)
+        check_bool="True"
+
+        beginEpochTime=`date -d"$beginDate $beginTime2 $beginOffset" +%s`
+        endEpochTime=`date -d"$endDate $endTime $endOffset" +%s`
+
+        while [ ${beginEpochTime} != ${endEpochTime} ];
+        do
+            beginTimeStamp=`date -d @${beginEpochTime}`
+            beginEpochTime=$(($beginEpochTime+900))
+            formatted_time=`date -d @${beginEpochTime} +"%H:%M:00"`
+            currentOffset=`date -d @${beginEpochTime} +'%z'`
+            currentOffset="$(echo ${currentOffset} | cut -c1-3):$(echo ${currentOffset} | cut -c4-5)"
+
+            if [ ${beginTime} -ge $(echo ${formatted_time} | sed 's/[":]//g') ]; then
+                if [ ${check_bool} == "True"  ]; then
+                    check_bool="False"
+                    beginDate=$(echo ${endTimeStamp} | cut -c2-11)
+                fi
+            fi
+            incrementedTime="endTime=\"${beginDate}T${formatted_time}${currentOffset}\""
+            beginTimeStamp=$(echo ${incrementedTime} | cut -d"=" -f2)
+
+            cat ${MINILINK_FILEPATH} | sed -e "s/${MINILINK_JOB_END_TIME_DEFAULT}/${incrementedTime}/g" >> ${HEADER_XML_FILE}
+
+        done
+
+        cat ${FOOTER_XML_FILE} >> ${HEADER_XML_FILE}
+
+    elif [ ${typeOfFile} == "A" ]; then
+        sed -i "s/${MINILINK_JOB_DURATION_DEFAULT}/${ECIM_JOB_DURATION}/g" ${MINILINK_FILEPATH}
+        sed -i "s/${MINILINK_JOB_END_TIME_DEFAULT}/${MINILINK_NEW_END_TIME}/g" ${MINILINK_FILEPATH}
+        cat ${MINILINK_FILEPATH} ${FOOTER_XML_FILE} >> ${HEADER_XML_FILE}
+    else
+        log "ERROR : Type of file ${typeOfFile} is invalid."
+        rm -rf "${MINILINK_TEMPLATE_DIR}/${DIR_NAME}"
+        exit 1
+    fi
+
+    log "INFO : Copying file in /pms_tmpfs directory."
+
+    MINILINK_PMS_PATH="/pms_tmpfs/${ml_sim}/${ml_node}/c/pm_data"
+
+    copy_ML_PM_data_file "${MINILINK_PMS_PATH}" "${HEADER_XML_FILE}" "${MINILINK_OUTPUT_FILE}"
+
+    rm -rf "${MINILINK_TEMPLATE_DIR}/${DIR_NAME}"
+}
+
+
+# This method is responsible for copy of MiniLink PM file in /pms_tmpfs.
+copy_ML_PM_data_file(){
+
+
+    ML_PMS_PATH=$1
+    SOURCE_ML_FILE=$2
+    DEST_ML_FILE=$3
+
+    if [[ ! -d "${ML_PMS_PATH}" ]]; then
+        mkdir -p "${ML_PMS_PATH}"
+    fi
+
+    gzip -c ${SOURCE_ML_FILE} > "${ML_PMS_PATH}/${DEST_ML_FILE}.gz"
+}
+
+
+processMiniLinkFile(){
+
+    ml_sim_name=$1
+    ml_node_name=$2
+    output_gz_filename=$3
+    ml_fileType=$4
+    ml_start_interval=$5
+    ml_end_interval=$6
+    sizeOfFile=$7
+    ml_rcID=$8
+    ml_localDn=$9
+    ml_userLabel=${10}
+    ml_mo_type=${11}
+
+    log "INFO : Processing data to generate ${ml_mo_type} files for ${ml_node_name} node."
+
+    sample_gz_filename=`ls ${MINILINK_TEMPLATE_DIR} | grep -i ${ml_mo_type} | grep -i ${sizeOfFile}`
+
+    if [[ -z "${sample_gz_filename}" ]]; then
+        log "ERROR: Required sample file is missing for ${ml_node_name} node."
+        exit 1
+    fi
+
+    output_xml_filename=$(echo ${output_gz_filename//.gz})
+
+    startDate=$(date -d"$( echo ${ml_start_interval} | cut -c1-8 )" +%Y-%m-%d)
+    startTime=$(date -d"$( echo ${ml_start_interval} | cut -c10-13 )" +%H:%M:00)
+    start_offset=$( echo ${ml_start_interval} | cut -c14-18 )
+    start_offset=$( echo ${start_offset:0:1}${start_offset:1:2}:${start_offset:3:2} )
+    end_offset=$( echo ${ml_end_interval}  | cut -c14-18 )
+    end_offset=$( echo ${end_offset:0:1}${end_offset:1:2}:${end_offset:3:2} )
+    endDate=$(date -d"$( echo ${ml_end_interval} | cut -c1-8 )" +%Y-%m-%d)
+    endTime=$(date -d"$( echo ${ml_end_interval} | cut -c10-13 )" +%H:%M:00)
+
+    MINILINK_JOB_BEGIN_TIME="beginTime=\"${startDate}T${startTime}${start_offset}\""
+    MINILINK_JOB_END_TIME="endTime=\"${endDate}T${endTime}${end_offset}\""
+
+    modified_node_name=$(echo ${ml_node_name} | sed 's/\-/_/g; s/\./_/g')
+
+    dir_name="${ml_fileType}_${ml_mo_type}_${modified_node_name}_${ml_rcID}"
+
+    mkdir "${MINILINK_TEMPLATE_DIR}/${dir_name}"
+
+    updateMiniLinkFile "${ml_sim_name}" "${ml_node_name}" "${output_xml_filename}" "${sample_gz_filename}" "${ml_fileType}" "${dir_name}" "${MINILINK_JOB_BEGIN_TIME}" "${MINILINK_JOB_END_TIME}" "${ml_localDn}" "${ml_userLabel}"
+
+}
+
+# This method is responsible to determine file type, like SOAM and ETHERNET.
+processMiniLinkNode(){
+
+    MiniLink_Args=$1
+
+    local IFS=";"
+
+    for minilink_arg in ${MiniLink_Args}
+    do
+        ml_attr_name=$(echo ${minilink_arg} | awk -F:: '{print $1}')
+        ml_attr_value=$(echo ${minilink_arg} | awk -F:: '{print $2}')
+        eval "ml_${ml_attr_name}=\"${ml_attr_value}\""
+    done
+
+    if [[ "${ml_node_category}" = "INDOOR" ]]; then
+
+        ml_mo_type=""
+
+        if [ ${ml_rcID} -lt 100 ]; then
+            ml_mo_type="ETHERNET"
+        else
+            ml_mo_type="SOAM"
+        fi
+
+        processMiniLinkFile "${ml_sim_name}" "${ml_node_name}" "${ml_file_name}" "${ml_fileType}" "${ml_start_time}" "${ml_end_time}" "${ml_fileToBeAssembled}" "${ml_rcID}" "${ml_localDn}" "${ml_userLabel}" "${ml_mo_type}"
+    fi
+
+    exit 0
+}
+
+
+processBSCSim(){
+
+   NETYPE=$1
+   SIMNAME_FILTER=$2
+   SIM_LIST=$3
+
+   if [[ ${TYPE} == "NSS" ]]; then
+      DEFAULT_MP_IDs="MP1001 MP1002 MP1003"
+   else
+      DEFAULT_MP_IDs="MP1001 MP1002 MP1003 MP1004"
+   fi
+
+   #If SIM_LIST is empty then read all the sims of that type
+    if [[ -z "${SIM_LIST}" ]] ; then
+         SIM_LIST=`ls /netsim/netsimdir | grep ${SIMNAME_FILTER} | grep -v zip`
+    fi
+
+    PM_FILE_DIR=/apfs/data_transfer/destinations/CDHDEFAULT/Ready
+    COUNT_DIR=/netsim_users/.count
+    #Default count value
+    COUNT=1990
+
+    #Fetch count value if configured in netsim_cfg file (Eg. BSC_COUNT="1:1990 15:1000")
+    if [[ ! -z ${BSC_COUNT} ]];then
+       for ROP_COUNT in ${BSC_COUNT}; do
+           ROP=`echo ${ROP_COUNT} | cut -d":" -f1`
+           if [[ ${ROP_PERIOD_MIN} -eq ${ROP} ]];then
+               COUNT=`echo ${ROP_COUNT} | cut -d":" -f2`
+           fi
+       done
+    fi
+
+    if [ ! -d ${COUNT_DIR} ];then
+         mkdir -p ${COUNT_DIR}
+    fi
+
+    COUNT_FILE=`ls ${COUNT_DIR}/ | grep ${NETYPE}_${ROP_PERIOD_MIN}_`
+
+    if [[ ! -z ${COUNT_FILE} ]];then
+        COUNT_FILE_NAME=$(basename ${COUNT_FILE})
+        COUNT=`echo ${COUNT_FILE_NAME} | cut -d"_" -f3`
+        rm -r ${COUNT_DIR}/${NETYPE}_${ROP_PERIOD_MIN}_${COUNT}
+        COUNT=$(($COUNT+1))
+        touch ${COUNT_DIR}/${NETYPE}_${ROP_PERIOD_MIN}_${COUNT}
+    else
+        touch ${COUNT_DIR}/${NETYPE}_${ROP_PERIOD_MIN}_${COUNT}
+    fi
+
+    for SIM_NAME in ${SIM_LIST} ; do
+        if grep -q $SIM_NAME "/tmp/showstartednodes.txt"; then
+           log "INFO: Processing SIM : ${SIM_NAME}"
+
+           echo `ls ${SIM_DIR}` | grep ${SIM_NAME} > /dev/null
+           if [ $? -eq 0 ] ; then
+
+              CORE_NE_LIST=`ls ${SIM_DIR}/${SIM_NAME}`
+              FILTERED_SIM_NAME=`echo ${SIM_NAME} | sed 's/-/_/g'`
+              NE_LIST=$(eval echo '$'${FILTERED_SIM_NAME}_node_list)
+
+              if [[ ! -z ${NE_LIST} ]]; then
+                  CORE_NE_LIST=${NE_LIST}
+              fi
+
+              for NE in $CORE_NE_LIST; do
+
+                  cat /tmp/showstartednodes.txt | awk '{ print $1 }' | grep ^${NE}$ > /dev/null
+                     if [[ $? -ne 0 ]];then
+                         continue
+                     fi
+
+                  FILTERED_NE=`echo ${NE} | sed 's/-/_/g'`
+                  MP_IDs=$(eval echo '$'${FILTERED_NE}_MP_IDs)
+
+                  if [[ ! -z ${MP_IDs} ]]; then
+                      DEFAULT_MP_IDs=${MP_IDs}
+                  fi
+
+                  if [[ -f ${BSC_MSC_Sim_Info_File} ]]; then
+                      NE_TYPE=`cat ${BSC_MSC_Sim_Info_File} | grep -w ${SIM_NAME} | grep -w ${NE} | cut -d"|" -f3 | sed 's/-/_/g'`
+                  else
+                      NE_TYPE=${FILTERED_NE}
+                  fi
+
+                  if [[ ${NE_TYPE} == *"MSRBS_V2"* ]]; then
+                      OUT_DIR=${SIM_DIR}/${SIM_NAME}/${NE}/fs/c/pm_data
+                      if [[ ! -d ${OUT_DIR} ]];then
+                          mkdir -p ${OUT_DIR}
+                      fi
+                      BSC_FILE_NAME="A${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_TIME_UTC}_${NE}.xml.gz"
+                      generate_MSC_BSC_File "${OUT_DIR}/${BSC_FILE_NAME}" "MSRBS_V2"
+                  else
+                      for JOB_ID in ${DEFAULT_MP_IDs};do
+                          OUT_DIR=${SIM_DIR}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE}STS-${JOB_ID}_${ROP_START_DATE_UTC}${ROP_START_TIME_UTC}_${COUNT}
+                          mkdir -p ${OUT_DIR}
+                          if [[ ${NE_TYPE} == "MSC" ]]; then
+                              MSC_FILE_NAME=G${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_DATE_UTC}.${ROP_END_TIME_UTC}
+                              COPY_FILE_LOC=`getMscInputFile ""`
+                              generate_MSC_BSC_File "${OUT_DIR}/${MSC_FILE_NAME}" "MSC" "${COPY_FILE_LOC}"
+                          else
+                              generate_MSC_BSC_File "${OUT_DIR}/${BSC_FILE_NAME}" "BSC"
+                          fi
+                      done
+                  fi
+                  if [[ ${NE_TYPE} == "BSC" ]]; then
+                      if [[ ${TYPE} == "NSS" && ${ROP_PERIOD_MIN} == 15 ]] || [[ ${TYPE} == *"NRM"* ]] || [[ ${EXEC_FROM_HC} == "YES" ]]; then
+                          echo "${SIM_NAME}:${NE}:RECS:${ROP_PERIOD_MIN}" >> ${TMP_GSM_EVENT_FILE}
+                      fi
+                  fi
+              done
+           fi
+        fi
+    done
+}
+
+
+createMpRange(){
+
+    endRange=$1
+    rangeData=""
+
+    for i in `seq 1 $endRange`; do
+            rangeData="${rangeData} MP10$(printf %02d ${i})"
+    done
+    echo ${rangeData}
+}
+
+processHLRSim(){
+
+   local SIMTYPE=$1
+   local SIMNAME_FILTER=$2
+   local SIM_LIST=$3
+
+   DEFAULT_MP_IDs=""
+
+   #If SIM_LIST is empty then read all the sims of that type
+    if [[ -z "${SIM_LIST}" ]] ; then
+         SIM_LIST=`ls /netsim/netsimdir | grep ${SIMNAME_FILTER} | grep -v zip`
+    fi
+
+    PM_FILE_DIR=/apfs/data_transfer/destinations/CDHDEFAULT/Ready
+    COUNT_DIR=/netsim_users/.count
+    #Default count value
+    COUNT=1990
+
+    for SIM_NAME in ${SIM_LIST} ; do
+
+        ls ${SIM_DIR} | grep ${SIM_NAME} > /dev/null
+        if [[ $? -ne 0 ]]; then
+             continue
+        else
+             if grep -q $SIM_NAME "/tmp/showstartednodes.txt"; then
+                log "INFO: Processing SIM : ${SIM_NAME}"
+             else
+                continue
+             fi
+        fi
+        if [[ $SIMTYPE == "HLR-FE-BSP" ]] || [[ $SIMTYPE == "HLR-FE-IS" ]] || [[ $SIMTYPE == "vHLR-BS" ]]; then
+            if [[ -z ${HLR_MP_BC_COUNT} ]]; then
+                DEFAULT_MP_IDs=$(createMpRange 3)
+            else
+                if [[ ${HLR_MP_BC_COUNT} -gt 2 ]] && [[ ${HLR_MP_BC_COUNT} -lt 33 ]]; then
+                    DEFAULT_MP_IDs=$(createMpRange ${HLR_MP_COUNT})
+                else
+                    DEFAULT_MP_IDs=$(createMpRange 3)
+                    log "WARN: The value of HLR_MP_BC_COUNT in netsim_cfg should be between 3 and 32 only but the present value is: ${HLR_MP_BC_COUNT} and for now it is set to 3 by default"
+                fi
+            fi
+        else
+            if [[ -z ${HLR_MP_COUNT} ]]; then
+                DEFAULT_MP_IDs=$(createMpRange 10)
+            else
+                if [[ ${HLR_MP_COUNT} -gt 9 ]] && [[ ${HLR_MP_COUNT} -lt 33 ]]; then
+                    DEFAULT_MP_IDs=$(createMpRange ${HLR_MP_COUNT})
+                else
+                    DEFAULT_MP_IDs=$(createMpRange 10)
+                    log "WARN: The value of HLR_MP_COUNT in netsim_cfg should be between 10 and 32 only but the present value is: $HLR_MP_COUNT and for now it is set to 10 by default"
+                fi
+            fi
+        fi
+
+        #Fetch count value if configured in netsim_cfg file (Eg. HLR_COUNT="1:1990 15:1000")
+        if [[ ! -z ${HLR_COUNT} ]];then
+           for ROP_COUNT in ${HLR_COUNT}; do
+               ROP=`echo ${ROP_COUNT} | cut -d":" -f1`
+               if [[ ${ROP_PERIOD_MIN} -eq ${ROP} ]];then
+                   COUNT=`echo ${ROP_COUNT} | cut -d":" -f2`
+               fi
+           done
+        fi
+
+        if [ ! -d ${COUNT_DIR} ];then
+             mkdir -p ${COUNT_DIR}
+        fi
+
+        COUNT_FILE=`ls ${COUNT_DIR}/ | grep ${NETYPE}_${ROP_PERIOD_MIN}_`
+
+        if [[ ! -z ${COUNT_FILE} ]];then
+            COUNT=`echo ${COUNT_FILE} | rev |  cut -d"_" -f1 | rev`
+            COUNT=$(($COUNT+1))
+            rm -rf ${COUNT_DIR}/${COUNT_FILE}
+            touch ${COUNT_DIR}/${NETYPE}_${ROP_PERIOD_MIN}_${COUNT}
+        else
+            touch ${COUNT_DIR}/${NETYPE}_${ROP_PERIOD_MIN}_${COUNT}
+        fi
+
+
+        CORE_NE_LIST=""
+        FILTERED_SIM_NAME=$(echo ${SIM_NAME} | sed 's/[-.]/_/g')
+        NE_LIST=$(eval echo '$'${FILTERED_SIM_NAME}_node_list)
+
+        if [[ ! -z ${NE_LIST} ]]; then
+           CORE_NE_LIST=${NE_LIST}
+        else
+           CORE_NE_LIST=`ls ${SIM_DIR}/${SIM_NAME}`
+        fi
+
+        for NE in $CORE_NE_LIST; do
+            FILTERED_NE=`echo ${NE} | sed 's/[-.]/_/g'`
+            if [[ -f ${BSC_MSC_Sim_Info_File} ]]; then
+                NE_TYPE=`cat ${BSC_MSC_Sim_Info_File} | grep -w ${SIM_NAME} | grep "|${NE}|" | cut -d"|" -f3 | sed 's/-/_/g'`
+            else
+                NE_TYPE=${FILTERED_NE}
+            fi
+            # For skipping Blade nodes in HLR-FE(BC/IS)
+            if [[ $SIMTYPE == *HLR-FE* ]];then
+                if [[ ${NE_TYPE} == *"SPX"* ]] || [[ ${NE_TYPE} == *"BP"* ]] || [[ ${NE_TYPE} == *"CP"* ]] || [[ ${NE_TYPE} == *"IPLB"* ]] || [[ ${NE_TYPE} == *"TSC"* ]];then
+                continue
+                fi
+            fi
+
+            MP_IDs=$(eval echo '$'${FILTERED_NE}_MP_IDs)
+            if [[ ! -z ${MP_IDs} ]]; then
+                DEFAULT_MP_IDs=${MP_IDs}
+            fi
+
+            if [[ $SIMTYPE == "HLR-FE-BSP" ]] || [[ $SIMTYPE == "HLR-FE-IS" ]] || [[ $SIMTYPE == "vHLR-BS" ]]; then
+                for JOB_ID in ${DEFAULT_MP_IDs};do
+                    OUT_DIR=${SIM_DIR}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${JOB_ID}_${ROP_START_DATE_UTC}${ROP_START_TIME_UTC}_${COUNT}
+                    mkdir -p ${OUT_DIR}
+                    cp /netsim_users/pms/sandbox_templates/HLRFE/HLRFE_BC/G20180302.1700-20180302.1705 ${OUT_DIR}/${HLR_FILE_BC_NAME}
+                done
+            else
+                for JOB_ID in ${DEFAULT_MP_IDs};do
+                    OUT_DIR=${SIM_DIR}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${JOB_ID}_${ROP_START_DATE_UTC}${ROP_START_TIME_UTC}_${COUNT}
+                    mkdir -p ${OUT_DIR}
+                    cp /netsim_users/pms/sandbox_templates/HLRFE/G20180206.0815-20180206.0830 ${OUT_DIR}/${HLR_FILE_NAME}
+                done
+            fi
+        done
+    done
+}
+
+update_gsm_event_log_file(){
+
+    mtr_file_gen_check=$1
+    SIM_NAME=$2
+    NE=$3
+
+    if [[ ${TYPE} == "NSS" && ${ROP_PERIOD_MIN} = 1 ]] || [[ ${TYPE} == *"NRM"* ]] || [[ ${EXEC_FROM_HC} == "YES" ]] ; then
+        if [[ ${mtr_file_gen_check} == 'True' ]]; then
+            echo "${SIM_NAME}:${NE}:MTR:${ROP_PERIOD_MIN}" >> ${TMP_GSM_EVENT_FILE}
+        fi
+    fi
+    if [[ ${TYPE} == "NSS" && ${ROP_PERIOD_MIN} = 15 ]] || [[ ${TYPE} == *"NRM"* ]] || [[ ${EXEC_FROM_HC} == "YES" ]] ; then
+        echo "${SIM_NAME}:${NE}:RECS:${ROP_PERIOD_MIN}" >> ${TMP_GSM_EVENT_FILE}
+    fi
+}
+
+processMSCSim(){
+
+   local SIMTYPE=$1
+   local SIMNAME_FILTER=$2
+   local SIM_LIST=$3
+
+   if [[ ${TYPE} == "NSS" ]]; then
+      DEFAULT_MP_IDs="MP2001 MP2002"
+   else
+      DEFAULT_MP_IDs="MP2001 MP2002 MP2003"
+   fi
+
+   #If SIM_LIST is empty then read all the sims of that type
+    if [[ -z "${SIM_LIST}" ]] ; then
+        SIM_LIST=`ls /netsim/netsimdir | grep ${SIMNAME_FILTER} | grep -v zip`
+    fi
+
+    #PM file path
+    PM_FILE_DIR=/apfs/data_transfer/destinations/CDHDEFAULT/Ready
+        if [ -z ${GSM_MSC_BSC_MTR_FILE_DIR} ];then
+        log "ERROR: MTR out dir not present in netsim_cfg file"
+    fi
+    COUNT_DIR=/netsim_users/.count
+    #Default count value
+    COUNT=2001
+
+    #Fetch count value if configured in netsim_cfg file (Eg. MSC_COUNT="1:1990 15:1000")
+    if [[ ! -z ${MSC_COUNT} ]];then
+       for ROP_COUNT in ${MSC_COUNT}; do
+           ROP=`echo ${ROP_COUNT} | cut -d":" -f1`
+           if [[ ${ROP_PERIOD_MIN} -eq ${ROP} ]];then
+               COUNT=`echo ${ROP_COUNT} | cut -d":" -f2`
+           fi
+       done
+    fi
+
+    if [ ! -d ${COUNT_DIR} ];then
+         mkdir -p ${COUNT_DIR}
+    fi
+
+    for SIM_NAME in ${SIM_LIST} ; do
+        COUNT_FILE=`ls ${COUNT_DIR}/ | grep ${SIM_NAME}_${ROP_PERIOD_MIN}_`
+        if [[ ! -z ${COUNT_FILE} ]];then
+            COUNT_FILE_NAME=$(basename ${COUNT_FILE})
+            COUNT=`echo ${COUNT_FILE_NAME} | rev |cut -d"_" -f1 | rev`
+            rm -r ${COUNT_DIR}/${SIM_NAME}_${ROP_PERIOD_MIN}_${COUNT}
+            COUNT=$(($COUNT+1))
+            touch ${COUNT_DIR}/${SIM_NAME}_${ROP_PERIOD_MIN}_${COUNT}
+        else
+            touch ${COUNT_DIR}/${SIM_NAME}_${ROP_PERIOD_MIN}_${COUNT}
+        fi
+    done
+    for SIM_NAME in ${SIM_LIST}; do
+        mtr_file_gen_check='False'
+        echo ${SIM_NAME} | grep "BC" > /dev/null
+        if [ $? -eq 0 ]; then
+             MSC_FILE_NAME=G${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_DATE_UTC}.${ROP_END_TIME_UTC}
+        fi
+        if grep -q $SIM_NAME "/tmp/showstartednodes.txt"; then
+           log "INFO: Processing SIM : ${SIM_NAME}"
+
+           echo `ls ${SIM_DIR}` | grep ${SIM_NAME} > /dev/null
+           if [ $? -eq 0 ] ; then
+
+              CORE_NE_LIST=`ls ${SIM_DIR}/${SIM_NAME}`
+              FILTERED_SIM_NAME=`echo ${SIM_NAME} | sed 's/[-.]/_/g'`
+              NE_LIST=$(eval echo '$'${FILTERED_SIM_NAME}_node_list)
+
+              if [[ ! -z ${NE_LIST} ]]; then
+                  CORE_NE_LIST=${NE_LIST}
+              fi
+
+              #MTR File generation is required for 1min ROP in MT and 15 min ROP in RV
+              if [[ ${TYPE} == "NSS" && ${ROP_PERIOD_MIN} == "1" ]] || [[ ${TYPE} == "NRM"* && ${ROP_PERIOD_MIN} == "15" ]];then
+                   if [[ ${SIMTYPE} == "MSC-DB" ]] || [[ ${SIMTYPE} == "MSC-DB-BSP" ]] || [[ ${SIMTYPE} == "vMSC" ]] ||  [[ ${SIMTYPE} == "vMSC-HC" ]] || [[ ${SIMTYPE} == "MSCv" ]] || [[ ${SIMTYPE} == "MSC-BC-BSP" ]] || [[ ${SIMTYPE} == "MSC-BC-IS" ]];then
+                        mtr_file_gen_check='True'
+                   fi
+              fi
+
+              if [[ ${SIMTYPE} == "vMSC-HC" ]] || [[ ${SIMTYPE} == "MSC-BC-BSP" ]] || [[ ${SIMTYPE} == "MSC-BC-IS" ]]; then
+                      MSC_FILE_NAME=G${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_DATE_UTC}.${ROP_END_TIME_UTC}
+                      if [[ ${TYPE} == "NSS" ]]; then
+                          DEFAULT_MP_IDs="MP2001"
+                      else
+                          DEFAULT_MP_IDs="MP2001 MP2002 MP2003 MP2004 MP2005 MP2006"
+                      fi
+                      COPY_FILE_LOC=`getMscInputFile "MSC_BC"`
+              elif [[ ${SIMTYPE} == "MSC-DB-BSP" ]]; then
+                      DEFAULT_MP_IDs="MP2001"
+                      COPY_FILE_LOC=`getMscInputFile "MSC_DB_BSP"`
+              else
+                      COPY_FILE_LOC=`getMscInputFile ""`
+
+              fi
+
+              #Start PM file Generation
+              for NE in ${CORE_NE_LIST}; do
+                  #Generate files only for started nodes
+                  cat /tmp/showstartednodes.txt | awk '{ print $1 }' | grep ^${NE}$ > /dev/null
+                     if [[ $? -ne 0 ]];then
+                         continue
+                     fi
+                  #Get NE-TYPE for node
+                  FILTERED_NE=`echo ${NE} | sed 's/[-.]/_/g'`
+                  if [[ -f ${BSC_MSC_Sim_Info_File} ]]; then
+                      NE_TYPE=`cat ${BSC_MSC_Sim_Info_File} | grep -w ${SIM_NAME} | grep "|${NE}|" | cut -d"|" -f3`
+                  else
+                      NE_TYPE=${FILTERED_NE}
+                  fi
+
+                  if [[ ${NE_TYPE} != "BSC" ]];then
+                      echo ${NE_TYPES} | grep -w ${NE_TYPE} > /dev/null
+                      if [ $? -ne 0 ]; then
+                           continue
+                      fi
+                  else
+                      #Here we referring BSC node inside parent MSC :
+                      #As MSC_BSC when called from flex ROP
+                      #As BSC when called normally
+                      echo ${NE_TYPES} | egrep -w "BSC|MSC_BSC" > /dev/null
+                      if [ $? -ne 0 ]; then
+                           continue
+                      fi
+                  fi
+
+                  #Skipping Blade nodes
+                  if [[ ${NE_TYPE} == *"SPX"* ]] || [[ ${NE_TYPE} == *"BP"* ]] || [[ ${NE_TYPE} == *"CP"* ]] || [[ ${NE_TYPE} == *"IPLB"* ]] || [[ ${NE_TYPE} == *"TSC"* ]] || [[ ${NE_TYPE} == "BSP" ]] || [[ ${NE_TYPE} == "LANSWITCH" ]] ;then
+                      continue
+                  fi
+
+                  if [[ ${NE_TYPE} == 'BSC' ]] || [[ ${NE_TYPE} == 'vBSC' ]]; then
+                        #update GSM Event log file for REC and MTR file generation
+                        update_gsm_event_log_file ${mtr_file_gen_check} ${SIM} ${NE}
+                        #MP ids for BSC node types
+                        if [[ ${TYPE} == "NSS" ]]; then
+                            DEFAULT_MP_IDs="MP1001 MP1002 MP1003"
+                        else
+                            if [[ ${NE_TYPE} == 'BSC' ]]; then
+                                DEFAULT_MP_IDs="MP1001 MP1002 MP1003 MP1004"
+                            elif [[ ${NE_TYPE} == 'vBSC' ]]; then
+                            #vBSC is not supported in NRM deployment
+                                 continue
+                            fi
+                        fi
+                  fi
+
+                  MP_IDs=$(eval echo '$'${FILTERED_NE}_MP_IDs)
+
+                  if [[ ! -z ${MP_IDs} ]]; then
+                      DEFAULT_MP_IDs=${MP_IDs}
+                  fi
+
+                  for JOB_ID in ${DEFAULT_MP_IDs};do
+                      OUT_DIR=${SIM_DIR}/${SIM_NAME}/${NE}/${PM_FILE_DIR}/${NE}STS-${JOB_ID}_${ROP_START_DATE_UTC}${ROP_START_TIME_UTC}_${COUNT}
+
+                      if [[ ${NE_TYPE} == "BSC_MSRBS_V2" ]] ;then
+                          OUT_DIR=${SIM_DIR}/${SIM_NAME}/${NE}/fs/c/pm_data
+                          BSC_FILE_NAME="A${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_TIME_UTC}_${NE}.xml.gz"
+                          generate_MSC_BSC_File "${OUT_DIR}/${BSC_FILE_NAME}" "MSRBS_V2"
+                      elif [[ ${NE_TYPE} == "BSC" ]]; then
+                          MSC_FILE_NAME=C${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_DATE_UTC}.${ROP_END_TIME_UTC}
+                          generate_MSC_BSC_File "${OUT_DIR}/${MSC_FILE_NAME}" "BSC" "" "$JOB_ID" "${NE}"
+                      elif [[ ${NE_TYPE} == "vBSC" ]]; then
+                          MSC_FILE_NAME=C${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_DATE_UTC}.${ROP_END_TIME_UTC}
+                          generate_MSC_BSC_File "${OUT_DIR}/${MSC_FILE_NAME}" "vBSC"
+                      elif [[ ${SIMTYPE} == "vMSC-HC" ]] || [[ ${SIMTYPE} == "MSC-BC-BSP" ]] || [[ ${SIMTYPE} == "MSC-BC-IS" ]] || [[ ${SIMTYPE} == "MSC-DB-BSP" ]]; then
+                          generate_MSC_BSC_File "${OUT_DIR}/${MSC_FILE_NAME}" "None" "${COPY_FILE_LOC}"
+                      else
+                          generate_MSC_BSC_File "${OUT_DIR}/${MSC_FILE_NAME}" "MSC" "${COPY_FILE_LOC}"
+                      fi
+                  done
+              done
+           fi
+        fi
+    done
+}
+
+# Generate MSRBS-V2(BSC and MSC) file for an input node
+generate_MSC_BSC_File(){
+    dest_file_path=${1}
+    node_type=${2}
+    input_file_path=${3}
+    dest_dir_path=$(dirname ${dest_file_path})
+
+    if [[ ! -d ${dest_dir_path} ]];then
+        mkdir -p ${dest_dir_path}
+    fi
+    if [[ ${node_type} == "BSC" ]]; then
+       mp_id=${4}
+       nodename=${5}
+    fi
+
+    if [[ ${node_type} == "BSC" ]] || [[ ${node_type} == "vBSC" ]]; then
+        start_date_time=`echo "$dest_file_path" | rev | awk -F'/' '{print $1}'| rev | cut -c2-14 | sed 's/\.//g'`
+        end_date_time=`echo "$dest_file_path" | rev | awk -F'/' '{print $1}'| rev | cut -c16-28| sed 's/\.//g'`
+        if [[ ${TYPE} == "NRM5.1" ]] && [[ ${nodename} == ${EIGHT_K_BSC} ]]; then
+             input_file_path="/netsim_users/pms/sandbox_templates/BSC/BSC_THIN_LAYER/${mp_id}/CSTART_DATE.START_TIME-END_DATE.END_TIME_NODE"
+             sed -e "s/202012030445/${start_date_time}/g;s/202012030500/${end_date_time}/g" ${input_file_path} > ${dest_file_path}
+        else
+             input_file_path="/netsim_users/pms/sandbox_templates/BSC/CSTART_DATE.START_TIME-END_DATE.END_TIME_NODE"
+             sed -e "s/201801160830/${start_date_time}/g;s/201801160845/${end_date_time}/g" ${input_file_path} > ${dest_file_path}
+        fi
+    elif [[ ${node_type} == "MSC" ]]; then
+        ln ${input_file_path} ${dest_file_path}
+    elif [[ ${node_type} == "MSRBS_V2" ]]; then
+        input_file_path="/netsim_users/pms/sandbox_templates/BSC/DSTART_DATE.START_TIME-END_DATE.END_TIME_NODE.gz"
+        cp ${input_file_path} ${dest_file_path}
+    else
+        ln ${input_file_path} ${dest_file_path}
+    fi
+}
+
+#get Input files for MSC nodes
+getMscInputFile(){
+
+  msc_type=$1
+  rop_start_min=${ROP_START_TIME_UTC:(-2)}
+  rop_start_min=`echo ${rop_start_min} | awk '{printf "%d\n",$0;}'`
+
+  if [[ ${TYPE} == NSS ]] || [[ $(($rop_start_min % 15)) != 0 ]] ;then
+        msc_input_file_path=${NETSIM_SANDBOX_DIR}/MSC/${msc_type}/CSTART_DATE.START_TIME-END_DATE.END_TIME_NODE
+  else
+        msc_input_file=`ls ${NETSIM_SANDBOX_DIR}/MSC/MSC_templates/${msc_type} | grep "20[0-9][0-9][0-1][0-9][0-3][0-9]\.${ROP_START_TIME_UTC}\-20[0-9][0-9][0-1][0-9][0-3][0-9]\.${ROP_END_TIME_UTC}"`
+        msc_input_file_name=`basename ${msc_input_file}`
+        msc_input_file_path=${NETSIM_SANDBOX_DIR}/MSC/MSC_templates/${msc_type}/${msc_input_file_name}
+        tmp_start_date_time=`grep -a -o "20[0-9][0-9][0-1][0-9][0-3][0-9][0-2][0-9][0-5][0-9]Z" ${msc_input_file_path} | sort -u | head -1`
+        tmp_end_date_time=`grep -a -o "20[0-9][0-9][0-1][0-9][0-3][0-9][0-2][0-9][0-5][0-9]Z" ${msc_input_file_path} | sort -u | tail -1`
+        sed -i "s/${tmp_start_date_time}/${ROP_START_DATE_UTC}${ROP_START_TIME_UTC}Z/g;s/${tmp_end_date_time}/${ROP_END_DATE_UTC}${ROP_END_TIME_UTC}Z/g" ${msc_input_file_path}
+  fi
+  echo ${msc_input_file_path}
+}
+
+
+#
+# Main
+#
+
+NE_TYPES="LTE WRAN GSM_DG2 RNC RXI RBS PRBS DSC ERBS MSRBS_V1 SAPC TCU TCU02 TCU03 TCU04 SIU SIU02 SGSN MSRBS_V2 SPITFIRE MGW M-MGW CSCF MTAS SBG VSBG WCG EPG-SSR EPG-EVR HSS RNNODE VPP VRC MRSV IPWORKS MRFV UPG WMG EME BSC vBSC BSC_MSRBS_V2 VTFRADIONODE 5GRADIONODE R6274 R6675 R6672 R6673 R6371 R6471-1 R6471-2 R6273 MSC-DB MSC-DB-BSP MSCv MSC-vIP-STP MSC-IP-STP IP-STP MSC-BC-BSP MSC-BC-IS vMSC CTC-MSC-BC-BSP vMSC-HC MSC vIP-STP VRM HLR-FE vHLR-BS HLR-FE-BSP HLR-FE-IS VRSM VSAPC MRS GNODEBRADIO PCC PCG SC CCDM CCRC CCPC HSS-FE MRF CCSM STN VBGF C608 VWMG HSS EPG ESAPC VTIF ESC CCES VNSDS CONTROLLER6610 SMSF SHARED-CNF cIMS"
+
+
+DO_SUPPORTED_NETYPES="SGSN VSAPC DSC GNODEBRADIO UPG CSCF CCRC CCES CCSM SC HSS-FE CCDM CCPC"
+
+TOPOLOGY_SUPPORTED_DO_NETYPE="SGSN"
+MD_1_SUPPORTED_NE_TYPES="MTAS SGSN"
+
+COMMON_TOUCH_FOLDER_LOCATION="/netsim_users/pms/config/touch_folder"
+EBSN_TEMPLATE_TOUCH_FILE="${COMMON_TOUCH_FOLDER_LOCATION}/ebsn_template_upload"
+EBSN_CSV_TOUCH_FILE="${COMMON_TOUCH_FOLDER_LOCATION}/ebsn_csv_upload"
+PCC_PCG_TEMPLATE_TOUCH_FILE="${COMMON_TOUCH_FOLDER_LOCATION}/pcc_pcg_template_upload"
+PCC_PCG_CONFIG_TOUCH_FILE="${COMMON_TOUCH_FOLDER_LOCATION}/pcc_pcg_time_sync_config_upload"
+
+STATIC_DOWNLOADED_DATA="/netsim_users/pms/config/DOWNLOADED_DATA"
+EBSN_TEMPLATE_DOWNLOADED_DATA="${STATIC_DOWNLOADED_DATA}/EBSN_TEMPLATE"
+EBSN_CSV_DOWNLOADED_DATA="${STATIC_DOWNLOADED_DATA}/EBSN_COUNTER_UPDATE"
+PCC_PCG_TEMPLATE_DOWNLOADED_DATA="${STATIC_DOWNLOADED_DATA}/PCC_PCG_TEMPLATE"
+PCC_PCG_CONFIG_DOWNLOADED_DATA="${STATIC_DOWNLOADED_DATA}/PCC_PCG_TIME_SYNC_CONFIG"
+
+CSV_TO_JSON_CONVERTER="/netsim_users/pms/bin/csvToJson.py"
+EBSN_MAPPING_JSON="/netsim_users/pms/config/pm_config/ebsn_replay_counter_info.json"
+PYTHON_ROP_GEN_SCRIPT="/netsim_users/pms/bin/mapRopInfo.py"
+EBSN_TEMPLATE_MAPPER="/netsim_users/pms/bin/pmStaticFileMapper.py"
+EBSN_PERF_GENERATOR="/netsim_users/pms/bin/pmStatsEbsnGen.py"
+
+# Need to source this first to override some vars (e.g. PMDIR)
+if [ -r /netsim/netsim_cfg ] ; then
+    . /netsim/netsim_cfg > /dev/null 2>&1
+fi
+
+if [[ ${STATS_ENABLED} != "true" && ${REPLAY_ENABLED} != "true" && ${FUTURE_ENABLED} != "true" ]]; then
+    echo "Stats and Replay not enabled in /netsim_cfg"
+    exit 1
+fi
+if [[ ${OSS_enabled} = "True" ]]; then
+    if [[ -r /netsim_users/pms/bin/eniq_stats_cfg ]] ; then
+        . /netsim_users/pms/bin/eniq_stats_cfg > /dev/null 2>&1
+    else
+        echo "/netsim_users/pms/bin/eniq_stats_cfg not found, exiting"
+        return 1
+    fi
+    if [[ -r /netsim_users/pms/bin/oss_location_information ]] ; then
+        . /netsim_users/pms/bin/oss_location_information > /dev/null 2>&1
+    else
+        echo "/netsim_users/pms/bin/oss_location_information not found, exiting"
+        return 1
+    fi
+fi
+
+BIN_DIR=`dirname $0`
+BIN_DIR=`cd ${BIN_DIR} ; pwd`
+
+MINILINK_TEMPLATE_DIR="/netsim_users/pms/minilink_templates"
+NODE_CELL_TYPE="/netsim_users/pms/etc/.node_cell_relation_file"
+BSC_MSC_Sim_Info_File='/netsim/genstats/tmp/bsc_msc_sim_info.txt'
+GSM_REC_SCRIPT='/netsim_users/pms/bin/gsm_rec.sh'
+NETSIM_SANDBOX_DIR='/netsim_users/pms/sandbox_templates'
+BCP_RECORDING_FILES_LOCATION='/netsim/genstats/bcp_templates/'
+TOPOLOGY_MAPPER='/netsim_users/auto_deploy/bin/topology_mapper.py'
+NODE_TEMPLATE_MAP='/netsim_users/pms/etc/node_template_map/node_template_map.txt'
+NETSIM_GENSTATS_XML_DIR='/netsim/genstats/xml_templates/'
+
+
+. ${BIN_DIR}/functions
+
+current_epoch=$(date +%s)
+
+# STATS_WORKLOAD_LIST variable is must as this defines the rop configuration if not present then log
+# message and exit the program execution.
+if [ -z "${STATS_WORKLOAD_LIST}" ] ; then
+    log "Variable STATS_WORKLOAD_LIST not found or not set in netsim_cfg file hence STATS files cannot be generated"
+    exit 1
+fi
+
+ETC_DIR=`cd ${BIN_DIR} ; cd ../etc ; pwd`
+XML_TEMPLATE_DIR=`cd ${BIN_DIR} ; cd ../xml_templates ; pwd`
+ROP_PERIOD_MIN=15
+BULK_OSS_PM="False"
+
+DAILY_ROP="NO"
+
+ROUTER_NE_TYPES="SPITFIRE R6274 R6675 R6672 R6673 R6371 R6471-1 R6471-2 R6273"
+SUPPORTED_SELECTIVE_FLEX_NE="R6672 R6675 SPITFIRE"
+
+while getopts  "o:r:l:c:p:s:n:b:e:t:x:z:j:f:" flag
+do
+    case "$flag" in
+        f) FUTURE_ROP_GEN="$OPTARG";;
+        o) OUT_ROOT="$OPTARG";;
+        r) ROP_PERIOD_MIN="$OPTARG";;
+        l) NE_TYPES="$OPTARG";;
+        p) PMDIR="$OPTARG";;
+        c) CUSTOM_DIR="$OPTARG";;
+        s) STEP_DIR="$OPTARG";;
+        n) EXTRA_ARGS="$OPTARG";;
+        b) BULK_OSS_PM="$OPTARG";;
+        e) OSS_END_TIME="$OPTARG";;
+        t) OSS_START_TIME="$OPTARG";;
+        x) DAILY_ROP="$OPTARG";;
+        z) EXEC_FROM_HC="$OPTARG";;
+        j) CURRENT_EPOCH="$OPTARG";;
+        *) printf "Usage: %s < -c customdir > < -r rop interval in mins>  < -l Node Types list> <-o outdir> <-p pmdir> <-s stepdir> <-n node list> <-b boolean> <-x 24 hour ROP>\n" $0
+           exit 1;;
+    esac
+done
+
+if [[ ! -z ${CURRENT_EPOCH} ]]; then
+    current_epoch=${CURRENT_EPOCH}
+fi
+ENABLE_STEP_COUNTER="true"
+DIR_SUFFIX="STATS"
+if [ ! -z ${FUTURE_ROP_GEN} ]; then
+    if [ ${FUTURE_ROP_GEN} == "YES" ]; then
+        NE_TYPES="LTE GNODEBRADIO"
+        ENABLE_STEP_COUNTER="false"
+        DIR_SUFFIX="FUTURE"
+    fi
+fi
+
+if [ -z ${ROP_PERIOD_MIN} ] ; then
+    ROP_PERIOD_MIN=15
+fi
+
+ROP_PERIOD_SEC=$((${ROP_PERIOD_MIN}*60))
+
+if [[ ${EXEC_FROM_HC} == "YES" ]]; then
+    start_epoch=$(($((${current_epoch}/60))*60))
+elif [[ ${ROP_PERIOD_SEC} -gt 900 ]];then
+    start_epoch=$(($((${current_epoch}/900))*900))
+else
+    start_epoch=$(($((${current_epoch}/${ROP_PERIOD_SEC}))*${ROP_PERIOD_SEC}))
+fi
+end_epoch=$((${start_epoch}+${ROP_PERIOD_SEC}))
+previous_epoch=$((${start_epoch}-${ROP_PERIOD_SEC}))
+epoch_rop_folder="${start_epoch}_${end_epoch}"
+
+UTC_TIMEZONE=$(date -u +'%Z')
+
+current_offset=$(date -d @${start_epoch} +'%z')
+next_offset=$(date -d @${end_epoch} +'%z')
+
+system_time=$(date -d @${start_epoch} +'%H:%M')
+previous_rop_time_utc=$(date -u -d @${previous_epoch} +'%H%M')
+
+if [[ "${system_time}" == "00:00" && "${TYPE}" != "NSS" && ${NE_TYPES} != *"Mini-Link"* ]]; then
+    if [[ "${DAILY_ROP}" == "NO" ]]; then
+        if [[ ${ROP_PERIOD_MIN} == "15" ]]; then
+            rm -f /pms_tmpfs/xml_step/15/*_step*
+            /netsim_users/pms/bin/genStats -r 1440 -l "${ROUTER_NE_TYPES}" -x "YES" >> /netsim_users/pms/logs/genStats_1440min.log 2>&1
+        else
+            rm -f /pms_tmpfs/xml_step/${ROP_PERIOD_MIN}/*_step*
+        fi
+    fi
+fi
+
+#For Transport Nodes ( TCU02 / SIU02 ) current system date time for ROP period
+TRANSPORT_NE_CURRENT_DATE_TIME_IN_MINUTES=$((${start_epoch}/60))
+
+XML_TEMPLATE_DIR="${XML_TEMPLATE_DIR}/${ROP_PERIOD_MIN}"
+XML_GZ_EXTENSION=".xml.gz"
+
+#Get the ROP Start and End date and time
+
+#FOR CPP and BSC Nodes
+ROP_START_DATE_UTC=$(date -u -d @${start_epoch} +'%Y%m%d')
+ROP_START_TIME_UTC=$(date -u -d @${start_epoch} +'%H%M')
+ROP_END_DATE_UTC=$(date -u -d @${end_epoch} +'%Y%m%d')
+ROP_END_TIME_UTC=$(date -u -d @${end_epoch} +'%H%M')
+
+#FOR ECIM Nodes
+ROP_START_DATE_LOCAL=$(date -d @${start_epoch} +'%Y%m%d')
+ROP_START_TIME_LOCAL=$(date -d @${start_epoch} +'%H%M')
+ROP_LOCAL_OFFSET=$(date -d @${start_epoch} +'%z')
+ROP_END_DATE_LOCAL=$(date -d @${end_epoch} +'%Y%m%d')
+ROP_END_TIME_LOCAL=$(date -d @${end_epoch} +'%H%M')
+ROP_LOCAL_END_OFFSET=$(date -d @${end_epoch} +'%z')
+
+# ECIM Job start and end date and time
+PMJOB_START_DATE_UTC=$(date -u -d @${start_epoch} +'%Y-%m-%d')
+PMJOB_START_TIME_UTC=$(date -u -d @${start_epoch} +'%H:%M')
+PMJOB_END_DATE_UTC=$(date -u -d @${end_epoch} +'%Y-%m-%d')
+PMJOB_END_TIME_UTC=$(date -u -d @${end_epoch} +'%H:%M')
+
+#FOR DO SUPPORTED NODES
+PMJOB_START_DATE_DO=$(date -d @${start_epoch} +'%Y-%m-%d')
+PMJOB_END_DATE_DO=$(date -d @${end_epoch} +'%Y-%m-%d')
+PMJOB_START_TIME_DO=$(date -d @${start_epoch} +'%H:%M')
+PMJOB_END_TIME_DO=$(date -d @${end_epoch} +'%H:%M')
+
+#For EBSN Replay TimeStamp Update
+EBSN_START_DATE_TIME_LOCAL="beginTime=\"$(date -d @${start_epoch} +'%Y-%m-%dT%H:%M:%S%:z')\""
+EBSN_END_DATE_TIME_LOCAL="endTime=\"$(date -d @${end_epoch} +'%Y-%m-%dT%H:%M:%S%:z')\""
+
+# FOR SGSN MME SIM
+if [ ! -z "${MME_SIM_LIST}" ] ; then
+
+    MME_TZ="GB-Eire"
+    # check if Time zone is mentioned for SGSN Sims
+    if [ ! -z "${SGSN_TZ}" ] ; then
+        MME_TZ=${SGSN_TZ}
+    fi
+
+    MME_JOB_GROUP_ID=""
+    if [[ ${TYPE} == "NSS"  || ${TYPE} == "MD_1" ]]; then
+        if [[ ${ROP_PERIOD_MIN} -ne 15 ]]; then
+            if [[ ${UPDATE_SGSN_ROP_JOB_GROUP_INFO} == "YES" ]]; then
+                for id_hash in ${SGSN_DEFINED_ROP_JOB_GROUP_INFO}; do
+                    fetched_rop_id=$(echo ${id_hash} | awk -F':' '{print $1}')
+                    if [[ ${fetched_rop_id} == ${ROP_PERIOD_MIN} ]]; then
+                        MME_JOB_GROUP_ID="_"$(echo ${id_hash} | awk -F':' '{print $2}')
+                        break
+                    fi
+                done
+            fi
+        fi
+    fi
+
+    MME_ROP_START_DATE_LOCAL=$(TZ=${MME_TZ} date -d @${start_epoch} +'%Y%m%d')
+    MME_ROP_START_TIME_LOCAL=$(TZ=${MME_TZ} date -d @${start_epoch} +'%H%M')
+    MME_ROP_LOCAL_START_OFFSET=$(TZ=${MME_TZ} date -d @${start_epoch} +'%z')
+
+    MME_ROP_END_DATE_LOCAL=$(TZ=${MME_TZ} date -d @${end_epoch} +'%Y%m%d')
+    MME_ROP_END_TIME_LOCAL=$(TZ=${MME_TZ} date -d @${end_epoch} +'%H%M')
+    MME_ROP_LOCAL_END_OFFSET=$(TZ=${MME_TZ} date -d @${end_epoch} +'%z')
+    if [[ ${MME_ROP_LOCAL_START_OFFSET} != ${MME_ROP_LOCAL_END_OFFSET} ]];then
+       MME_UTC_START_TIME=$(date -u -d @${start_epoch} +'%H%M')
+       MME_OFFSET_TYPE=$(echo ${MME_ROP_LOCAL_END_OFFSET} | cut -c 1)
+       MME_OFFSET_HOUR=$(echo ${MME_ROP_LOCAL_END_OFFSET} | cut -c 2,3)
+       MME_OFFSET_MIN=$(echo ${MME_ROP_LOCAL_END_OFFSET} | cut -c 4,5)
+       if [[ ${MME_OFFSET_TYPE} == "+" ]];then
+          MME_ROP_START_TIME_LOCAL=$(date -u -d "${MME_UTC_START_TIME} +${MME_OFFSET_HOUR} hour $MME_OFFSET_MIN minutes " +"%H%M")
+       else
+          MME_ROP_START_TIME_LOCAL=$(date -u -d "${MME_UTC_START_TIME} -${MME_OFFSET_HOUR} hour $MME_OFFSET_MIN minutes " +"%H%M")
+       fi
+       MME_ROP_LOCAL_START_OFFSET=${MME_ROP_LOCAL_END_OFFSET}
+    fi
+
+    PMJOB_START_DATE=$(TZ=${MME_TZ} date -d @${start_epoch} +'%Y-%m-%d')
+    PMJOB_START_TIME=$(TZ=${MME_TZ} date -d @${start_epoch} +'%H:%M')
+    PMJOB_END_DATE=$(TZ=${MME_TZ} date -d @${end_epoch} +'%Y-%m-%d')
+    PMJOB_END_TIME=$(TZ=${MME_TZ} date -d @${end_epoch} +'%H:%M')
+
+fi
+
+if [ "${BULK_OSS_PM}" = "True" ] && [ "${OSS_enabled}" = "True" ] ; then
+    if [ -z "${OSS_END_TIME}" ] || [ -z "${OSS_START_TIME}" ]; then
+    log "Provide start time and end time if you want to generate files in bulk"
+    fi
+
+    #FOR CPP and BSC Nodes
+    ROP_START_DATE_UTC=${OSS_START_TIME:0:8}
+    ROP_START_TIME_UTC=${OSS_START_TIME:8:4}
+    ROP_END_TIME_UTC=${OSS_END_TIME:8:4}
+    ROP_END_DATE_UTC=${OSS_END_TIME:0:8}
+
+    #FOR ECIM Nodes
+    ROP_START_DATE_LOCAL=${OSS_START_TIME:0:8}
+    ROP_START_TIME_LOCAL=${OSS_START_TIME:8:4}
+    ROP_END_DATE_LOCAL=${OSS_END_TIME:0:8}
+    ROP_END_TIME_LOCAL=${OSS_END_TIME:8:4}
+
+    # ECIM Job start and end date and time
+    PMJOB_START_DATE_UTC=${OSS_START_TIME:0:4}-${OSS_START_TIME:4:2}-${OSS_START_TIME:6:2}
+    PMJOB_START_TIME_UTC=${OSS_START_TIME:8:2}:${OSS_START_TIME:10:2}
+    PMJOB_END_DATE_UTC=${OSS_END_TIME:0:4}-${OSS_END_TIME:4:2}-${OSS_END_TIME:6:2}
+    PMJOB_END_TIME_UTC=${OSS_END_TIME:8:2}:${OSS_END_TIME:10:2}
+
+    if [ ! -z "${MME_SIM_LIST}" ] ; then
+
+        MME_TZ=`date "+%Z"`
+        # check if Time zone is mentioned for SGSN Sims
+        if [ ! -z "${SGSN_TZ}" ] ; then
+            MME_TZ="${SGSN_TZ}"
+        fi
+
+        MME_ROP_START_DATE_LOCAL=$(TZ="${MME_TZ}" date --date 'TZ="UTC"'${OSS_START_TIME:0:8} "+%Y%m%d")
+        MME_ROP_START_TIME_LOCAL=$(TZ="${MME_TZ}" date --date 'TZ="UTC"'${OSS_START_TIME:8:4} "+%H%M")
+
+        MME_ROP_END_DATE_LOCAL=$(TZ="${MME_TZ}" date --date 'TZ="UTC"'${OSS_END_TIME:0:8} "+%Y%m%d")
+        MME_ROP_END_TIME_LOCAL=$(TZ="${MME_TZ}" date --date 'TZ="UTC"'${OSS_END_TIME:8:4} "+%H%M")
+        MME_ROP_LOCAL_END_OFFSET=$(TZ="${MME_TZ}" date "+%z")
+
+
+
+        PMJOB_START_DATE=$(TZ="${MME_TZ}" date --date 'TZ="UTC"'${OSS_START_TIME:0:8} "+%Y%m%d")
+        PMJOB_START_TIME=$(TZ="${MME_TZ}" date --date 'TZ="UTC"'${OSS_START_TIME:8:4} "+%H%M")
+        PMJOB_END_DATE=$(TZ="${MME_TZ}" date --date 'TZ="UTC"'${OSS_END_TIME:0:8} "+%Y%m%d")
+        PMJOB_END_TIME=$(TZ="${MME_TZ}" date --date 'TZ="UTC"'${OSS_END_TIME:8:4} "+%H%M")
+
+    fi
+fi
+
+# FOR SPITFIRE/ROUTER6672 TimeZone
+if [ ! -z "${ROUTER_TZ}" ] ; then
+    ROUTER_TZ=${ROUTER_TZ}
+else
+    ROUTER_TZ="GB-Eire"
+fi
+
+ROUTER_ROP_START_DATE_LOCAL=$(TZ=${ROUTER_TZ} date -d @${start_epoch} +'%Y%m%d')
+ROUTER_ROP_START_TIME_LOCAL=$(TZ=${ROUTER_TZ} date -d @${start_epoch} +'%H%M')
+ROUTER_ROP_LOCAL_OFFSET=$(TZ=${ROUTER_TZ} date -d @${start_epoch} +'%z')
+ROUTER_ROP_END_DATE_LOCAL=$(TZ=${ROUTER_TZ} date -d @${end_epoch} +'%Y%m%d')
+ROUTER_ROP_END_TIME_LOCAL=$(TZ=${ROUTER_TZ} date -d @${end_epoch} +'%H%M')
+ROUTER_ROP_LOCAL_END_OFFSET=$(TZ=${ROUTER_TZ} date -d @${end_epoch} +'%z')
+
+
+if [[ ${ROUTER_ROP_LOCAL_END_OFFSET} != ${ROUTER_ROP_LOCAL_OFFSET} ]];then
+   ROUTER_UTC_END_TIME=$(date -u -d @${end_epoch} +'%H%M')
+   OFFSET_TYPE=$(echo ${ROUTER_ROP_LOCAL_OFFSET} | cut -c 1)
+   OFFSET_HOUR=$(echo ${ROUTER_ROP_LOCAL_OFFSET} | cut -c 2,3)
+   OFFSET_MIN=$(echo ${ROUTER_ROP_LOCAL_OFFSET} | cut -c 4,5)
+
+   if [[ ${OFFSET_TYPE} == "+" ]];then
+       ROUTER_ROP_END_TIME_LOCAL=$(date -u -d "${ROUTER_UTC_END_TIME} +${OFFSET_HOUR} hour $OFFSET_MIN minutes " +"%H%M")
+   else
+       ROUTER_ROP_END_TIME_LOCAL=$(date -u -d "${ROUTER_UTC_END_TIME} -${OFFSET_HOUR} hour ${OFFSET_MIN} minutes " +"%H%M")
+   fi
+   ROUTER_ROP_LOCAL_END_OFFSET=${ROUTER_ROP_LOCAL_OFFSET}
+fi
+
+
+
+SIM_DIR="/netsim/netsim_dbdir/simdir/netsim/netsimdir"
+
+STEP_DIR="/tmp/${ROP_PERIOD_MIN}"
+OUT_ROOT=/netsim_users
+if [ -d /pms_tmpfs ] ; then
+    OUT_ROOT=/pms_tmpfs
+    STEP_DIR="/pms_tmpfs/xml_step/${ROP_PERIOD_MIN}"
+    if [ ! -d ${STEP_DIR} ] ; then
+        mkdir -p ${STEP_DIR}
+    fi
+fi
+
+#OUT_ROOT=/var/sftp/data/flsuser1/download/
+enm_id=`echo ${POD_ENM_ID} | awk -F'-' '{printf "%s%s", $5, $6}'`
+#OUT_ROOT=/ericsson/pmic/STATS/<node-dir>/<start-rop>-<end-rop>/<File>
+#OUT_ROOT=/ericsson/pmic/${DIR_SUFFIX}/node-dir/${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_TIME_UTC}
+OUT_ROOT=/ericsson/pmic/${DIR_SUFFIX}
+
+if [[ ! -d ${OUT_ROOT} ]] ;then
+    mkdir -p ${OUT_ROOT}
+fi
+PMDIR="/c/pm_data"
+
+
+if [ -z "${EPG_PM_FileLocation}" ] ; then
+    EPG_PM_FileLocation="/var/log/services/epg/pm/"
+fi
+
+MAKE_RNC_STAT=${BIN_DIR}/makeRncStat
+MAKE_RBS_STAT=${BIN_DIR}/makeRbsStat
+NR_MAKE_RBS_STAT=${BIN_DIR}/nrMakeRbsStat
+STEP_COUNTERS=${BIN_DIR}/stepCounters
+
+
+#FOR CPP Nodes
+STARTDATE_UTC="${ROP_START_DATE_UTC}${ROP_START_TIME_UTC}"
+ENDDATE_UTC="${ROP_START_DATE_UTC}${ROP_END_TIME_UTC}"
+CPP_FILENAME="A${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_TIME_UTC}:1.xml"
+CPP_OSS_PREFIX="A${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_TIME_UTC}_"
+
+#FOR ECIM Nodes
+STARTDATE_LOCAL="${ROP_START_DATE_LOCAL}${ROP_START_TIME_LOCAL}${ROP_LOCAL_OFFSET}"
+ENDDATE_LOCAL="${ROP_START_DATE_LOCAL}${ROP_END_TIME_LOCAL}${ROP_LOCAL_END_OFFSET}"
+ECIM_FILENAME_PREFIX="A${ROP_START_DATE_LOCAL}.${ROP_START_TIME_LOCAL}${ROP_LOCAL_OFFSET}-${ROP_END_TIME_LOCAL}${ROP_LOCAL_END_OFFSET}_"
+
+#Default start/stop times and duration in ECIM templates as these templates are generated via Java JAXB APIs
+#hence having default time interval instead of strings such as startdate/stopdate in CPP templates
+ECIM_JOB_BEGIN_TIME_DEFAULT="beginTime=\"1970-01-01T00:00:00.000Z\""
+ECIM_JOB_END_TIME_DEFAULT="endTime=\"1970-01-01T00:00:00.000Z\""
+ECIM_JOB_DURATION_DEFAULT="duration=\"PT0.000S\""
+MSRBS_JOB_DURATION_DEFAULT="duration=\"P0Y0M0DT0H0M0.000S\""
+NR_CELL_CU=",NRCellCU="
+NR_CELL_DU=",NRCellDU="
+MINILINK_JOB_DURATION_DEFAULT="duration=\"PT900S\""
+MINILINK_JOB_BEGIN_TIME_DEFAULT="beginTime=\"2016-10-07T02:30:00+02:00\""
+MINILINK_JOB_END_TIME_DEFAULT="endTime=\"2016-11-07T09:45:00+01:00\""
+MINILINK_USER_LABEL_DEFAULT="userLabel=\"TN100\""
+MINILINK_LOCAL_DN_DEFAULT="localDn=\"NE=10-41-99-100_TN100\""
+MINILINK_OUTDOOR_LOCAL_DN_DEFAULT="localDn=\"NE=PT-0-0-0-0_ML6352_243\""
+MINILINK_OUTDOOR_USER_LABEL_DEFAULT="userLabel=\"ML6352_243\""
+MINILINK_OUTDOOR_SW_VERSION_DEFAULT="swVersion=\"CXP9026371_3_R10F110_2-8\""
+
+ECIM_JOB_START_TIME="beginTime=\"${PMJOB_START_DATE_UTC}T${PMJOB_START_TIME_UTC}:00Z\""
+ECIM_JOB_END_TIME="endTime=\"${PMJOB_END_DATE_UTC}T${PMJOB_END_TIME_UTC}:00Z\""
+
+ECIM_JOB_START_TIME_LOCAL="beginTime=\"${ROP_START_DATE_LOCAL}T${ROP_START_TIME_LOCAL}:00${ROP_LOCAL_OFFSET}\""
+ECIM_JOB_END_TIME_LOCAL="endTime=\"${ROP_END_DATE_LOCAL}T${ROP_END_TIME_LOCAL}:00${ROP_LOCAL_END_OFFSET}\""
+
+DO_ECIM_JOB_START_TIME_LOCAL="beginTime=\"${PMJOB_START_DATE_DO}T${PMJOB_START_TIME_DO}:00$(echo ${ROP_LOCAL_OFFSET:0:3}:${ROP_LOCAL_OFFSET:3:4})\""
+DO_ECIM_JOB_END_TIME_LOCAL="endTime=\"${PMJOB_END_DATE_DO}T${PMJOB_END_TIME_DO}:00$(echo ${ROP_LOCAL_END_OFFSET:0:3}:${ROP_LOCAL_END_OFFSET:3:4})\""
+
+
+MME_ECIM_JOB_START_TIME_LOCAL="beginTime=\"${PMJOB_START_DATE}T${PMJOB_START_TIME}:00$(echo ${MME_ROP_LOCAL_START_OFFSET:0:3}:${MME_ROP_LOCAL_START_OFFSET:3:4})\""
+MME_ECIM_JOB_END_TIME_LOCAL="endTime=\"${PMJOB_END_DATE}T${PMJOB_END_TIME}:00$(echo ${MME_ROP_LOCAL_END_OFFSET:0:3}:${MME_ROP_LOCAL_END_OFFSET:3:4})\""
+
+
+#For BSC File Name
+BSC_FILE_NAME=C${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_DATE_UTC}.${ROP_END_TIME_UTC}
+
+#For MSC File Name
+MSC_FILE_NAME=C${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_DATE_UTC}.${ROP_END_TIME_UTC}
+
+#For HLR-FE File Name
+HLR_FILE_NAME=C${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_DATE_UTC}.${ROP_END_TIME_UTC}
+HLR_FILE_BC_NAME=G${ROP_START_DATE_UTC}.${ROP_START_TIME_UTC}-${ROP_END_DATE_UTC}.${ROP_END_TIME_UTC}
+
+TRANSPORT_DATA_DIR=data_dir
+TRANSPORT_ADMIN_DIR=admin_dir
+TRANSPORT_SEMAPHORE_DIR=semaphore_dir
+TRANSPORT_DATA_ECS_DIR=data_ecs_dir
+TRANSPORT_SEMAPHORE_ECS_DIR=semaphore_ecs_dir
+
+# For ECS date - time creation
+BEGIN_ECS_TIME="${PMJOB_START_DATE_UTC}T${PMJOB_START_TIME_UTC}:00"
+END_ECS_TIME="${PMJOB_END_DATE_UTC}T${PMJOB_END_TIME_UTC}:00"
+ECS_ROP_PERIOD="PT${ROP_PERIOD_MIN}M"
+ECIM_JOB_DURATION="duration=\"PT$((ROP_PERIOD_MIN*60))S\""
+
+XML_EXTENSION=".xml"
+TEMPFS_XML_TEMPLATE_DIR="/pms_tmpfs/xml_step/xml_templates/${ROP_PERIOD_MIN}"
+if [[ ! -d ${TEMPFS_XML_TEMPLATE_DIR} ]] ; then
+          mkdir -p ${TEMPFS_XML_TEMPLATE_DIR} ;
+fi
+
+
+
+HOSTNAME="hostname"
+
+
+# Check to generate MiniLink file
+if [[ ! -z "${EXTRA_ARGS}" ]] ; then
+    if [[ "${NE_TYPES}" = *"Mini-Link"* ]]; then
+        processMiniLinkNode "${EXTRA_ARGS}"
+    fi
+    exit 0
+fi
+
+
+if [ -z "${STATS_MAX_CONCURRENT}" ] ; then
+    STATS_MAX_CONCURRENT=1
+fi
+
+if [[ ${FUTURE_ROP_GEN} == "YES" ]]; then
+    STATS_MAX_CONCURRENT=1
+fi
+
+#Remove temporary step files if any
+if [[ ${EXEC_FROM_HC} != "YES" ]];then
+    rm -f ${STEP_DIR}/*${previous_rop_time_utc}*.tmp
+fi
+
+log "Start ${STARTDATE_UTC}"
+
+log "Generate files"
+
+CC_DIR="/tmp/${ROP_PERIOD_MIN}/genStats_CC"
+TMP_GSM_EVENT_FILE="/netsim_users/pms/etc/.GSM_EVENTS"
+SELECTIVE_NE_CONF="/netsim_users/pms/etc/.selective_ne_conf"
+
+if [[ ${PCC_PCG_FOR_ESOA} == "true" ]]; then
+  handle_uploaded_pcc_cpg_templates
+  handle_uploaded_time_sync_config_for_pcc_pcg
+else
+  log "WARNING : Skipping finding new upload request as PCC/PCG for ESOA is set to ${PCC_PCG_FOR_ESOA} in /netsim/netsim_cfg..."
+fi
+
+# Setup the support for concurrent execution
+# Make sure we have a separate directory for each run
+if [ ${STATS_MAX_CONCURRENT} -gt 1 ]  ; then
+    if [ ! -d ${CC_DIR} ] ; then
+        mkdir -p ${CC_DIR}
+    else
+        # Remove any existing files to clean up from
+        # any failed runs
+        EXISTS_LIST=$(find ${CC_DIR} -type f)
+        if [ ! -z "${EXISTS_LIST}" ] ; then
+            log "WARNING: Found files in CC_DIR, removing"
+            echo "${EXISTS_LIST}"
+            find ${CC_DIR} -type f -exec rm {} \;
+        fi
+    fi
+fi
+
+
+if [[ ${STATS_ENABLED} == "true" || ${FUTURE_ENABLED} == "true" ]]; then
+    for SIM in $LIST ; do
+        if grep -q $SIM "/tmp/showstartednodes.txt"; then
+
+            if [ ${STATS_MAX_CONCURRENT} -eq 1 ]  ; then
+                processSim ${SIM}
+                if [ $? -ne 0 ] ; then
+                    exit 1
+                fi
+            else
+                NUM_RUNNING=`ls ${CC_DIR} | wc -l | awk '{print $1}'`
+                while [ ${NUM_RUNNING} -ge ${STATS_MAX_CONCURRENT} ] ; do
+                    sleep 1
+                    NUM_RUNNING=`ls ${CC_DIR} | wc -l | awk '{print $1}'`
+                done
+                LOCK_FILE=${CC_DIR}/${STARTDATE_UTC}.${SIM}
+                touch ${LOCK_FILE}
+
+                runConcurrent ${LOCK_FILE} ${SIM} &
+            fi
+        fi
+    done
+else
+    echo "Skipping stats, STATS is set to ${STATS_ENABLED} in /netsim/netsim_cfg..."
+fi
+
+wait
+
+
+# Handling of PCC/PCG ESOA Functional requirement
+if [[ ${PCC_PCG_FOR_ESOA} == "true" ]] && [[ ${PCC_PCG_FOR_ESOA_PERFORMANCE} == "false" ]]; then
+  processPCCnPCGSimForESOAFunctional
+fi
+
+
+
+# Handle data upload request for EBSN REPLAY/PERFORMANCE Mechanism
+if [[ ${REPLAY_ENABLED} == "true" ]]; then
+    if [[ ${ROP_PERIOD_MIN} == 15 ]]; then
+                handle_uploaded_ebsn_templates
+                handle_uploaded_ebsn_csv_file
+        fi
+else
+    log "WARNING : Skipping finding new upload request as Replay is set to ${REPLAY_ENABLED} in /netsim/netsim_cfg..."
+fi
+
+
+if [[ ${ROP_PERIOD_MIN} == 15 ]]; then
+    for NF in $ENABLED_STATIC_REPLAY; do
+        if [[ ${NF} != "ERBS" ]]; then
+            net_func_folder="NR_EBSN_${NF}"
+            if [[ ${REPLAY_ENABLED} == "false" ]] || [[ ${EBSN_PERFORMANCE_ENABLED} == "true" ]]; then
+                log "WARNING : Skipping Replay for ${NF} as Replay is set to ${REPLAY_ENABLED} in /netsim/netsim_cfg..."
+                continue
+            fi
+        else
+            net_func_folder="${NF}"
+        fi
+        STATIC_REPLAY_LOC="/ericsson/pmic/REPLAY/${net_func_folder}/${epoch_rop_folder}"        # Target directory
+        STATIC_TEMPLATE_DIR="/netsim_users/pms/xml_templates/replay/${NF}/"             # Source template directory
+
+        if [[ ! -d ${STATIC_REPLAY_LOC} ]]; then
+            log "WARNING: Directory ${STATIC_REPLAY_LOC} not present, creating one."
+            mkdir -p ${STATIC_REPLAY_LOC}
+            if [[ $? -eq 0 ]]; then
+                log "INFO : Directory ${STATIC_REPLAY_LOC} created."
+            else
+                log "ERROR : Not able to create directory ${STATIC_REPLAY_LOC}"
+                log "WARNING : Skipping generation for ${NF} for EBSN"
+                continue
+            fi
+        fi
+
+        log "INFO : Replaying PM ROP information for ${NF}."
+
+        for STATIC_REPLAY_FILE in `ls ${STATIC_TEMPLATE_DIR}`; do               # iterating on source template dir
+            STATIC_REPLAY_TEMPLATE="${STATIC_TEMPLATE_DIR}/${STATIC_REPLAY_FILE}"               # source template file full path
+            NEW_TEMPLATE_NAME=$(echo ${STATIC_REPLAY_TEMPLATE} | awk -F'/' '{print $8}' | cut -c 30- )
+            if [[ ${NF} != "ERBS" ]]; then
+                NEW_TEMPLATE_NAME="A${ROP_START_DATE_LOCAL}.${ROP_START_TIME_LOCAL}${ROP_LOCAL_OFFSET}-${ROP_END_TIME_LOCAL}${ROP_LOCAL_END_OFFSET}${NEW_TEMPLATE_NAME}.gz"
+            else
+                NEW_TEMPLATE_NAME="A${ROP_START_DATE_LOCAL}.${ROP_START_TIME_LOCAL}${ROP_LOCAL_OFFSET}-${ROP_END_TIME_LOCAL}${ROP_LOCAL_END_OFFSET}${NEW_TEMPLATE_NAME}"
+                cp ${STATIC_REPLAY_TEMPLATE} ${STATIC_REPLAY_LOC}/${NEW_TEMPLATE_NAME}
+                continue
+            fi
+            NEW_TEMPLATE_LOCATION="${STATIC_REPLAY_LOC}/${NEW_TEMPLATE_NAME}"
+            if [[ ${EBSN_REPLAY_COUNTER_MAPPING} == "true" ]]; then
+                if [[ -f ${EBSN_MAPPING_JSON} ]]; then
+                    ${PYTHON_ROP_GEN_SCRIPT} -n "EBSN_REPLAY" -o "${STATIC_REPLAY_TEMPLATE}" -f "${NEW_TEMPLATE_LOCATION}" -s "${EBSN_START_DATE_TIME_LOCAL}" -e "${EBSN_END_DATE_TIME_LOCAL}" -d "${ECIM_JOB_DURATION}" -m "${EBSN_MAPPING_JSON}"
+                else
+                    ${PYTHON_ROP_GEN_SCRIPT} -n "EBSN_REPLAY" -o "${STATIC_REPLAY_TEMPLATE}" -f "${NEW_TEMPLATE_LOCATION}" -s "${EBSN_START_DATE_TIME_LOCAL}" -e "${EBSN_END_DATE_TIME_LOCAL}" -d "${ECIM_JOB_DURATION}"
+                fi
+            else
+                ${PYTHON_ROP_GEN_SCRIPT} -n "EBSN_REPLAY" -o "${STATIC_REPLAY_TEMPLATE}" -f "${NEW_TEMPLATE_LOCATION}" -s "${EBSN_START_DATE_TIME_LOCAL}" -e "${EBSN_END_DATE_TIME_LOCAL}" -d "${ECIM_JOB_DURATION}"
+            fi
+        done
+    done
+fi
+
+if [[ ${ROP_PERIOD_MIN} == 15 ]] && [[ ${REPLAY_ENABLED} == "true" ]] && [[ ${EBSN_PERFORMANCE_ENABLED} == "true" ]]; then
+    EBSN_TARGET_FILE_FORMAT="A${ROP_START_DATE_LOCAL}.${ROP_START_TIME_LOCAL}${ROP_LOCAL_OFFSET}-${ROP_END_TIME_LOCAL}${ROP_LOCAL_END_OFFSET}_<TOPO_FULL_FDN>_osscounterfile_<NET_FUN>_1.xml.gz"
+    ${EBSN_PERF_GENERATOR} -s "${EBSN_START_DATE_TIME_LOCAL}" -e "${EBSN_END_DATE_TIME_LOCAL}" -d "${ECIM_JOB_DURATION}" -t "${epoch_rop_folder}" -f "${EBSN_TARGET_FILE_FORMAT}"
+fi
+
+
+
+#SGSN-MME STATS file generation
+echo ${NE_TYPES} | grep -w "SGSN" > /dev/null
+if [ $? -eq 0 ] ; then
+    if [ ! -z "${MME_SIM_LIST}" ] ; then
+        processEcimSim SGSN "${MME_SIM_LIST}"
+    fi
+fi
+
+#FOR MTR, MRR, BAR, RIR, CTR and CER File Generation in GSM SIMS
+if [[ -f ${TMP_GSM_EVENT_FILE} ]]; then
+    ${GSM_REC_SCRIPT} ${ROP_PERIOD_MIN} ${EXEC_FROM_HC} >> /netsim_users/pms/logs/gsm_rec.log
+fi
+#mv "${OUT_ROOT}" "${OUT_ROOT}_done"
+#EXTRA_JSON_ARGS=""
+#if [[ ${ON_DEMAND} == "true" ]]; then
+#    EXTRA_JSON_ARGS="${EXTRA_JSON_ARGS} -d true"
+#fi
+#EXTRA_JSON_ARGS="${EXTRA_JSON_ARGS} --mode default"
+
+
+#if [[ $ON_DEMAND == "false" ]];then
+#    python /netsim_users/pms/bin/crud_operator.py -a DEFAULT >> /netsim_users/pms/logs/crud_operations.log
+#fi
+touch_epoch_format=$(echo ${epoch_rop_folder} | sed 's/_/|/g')
+
+PM_CATEGORY_TYPE=""
+if [[ ! -z ${FUTURE_ROP_GEN} ]]; then
+    PM_CATEGORY_TYPE="FUTURE"
+else
+    # Put appending REPLAY keyword as well here based on condition from netsim_cfg
+    if [[ "${STATS_ENABLED}" == "true" ]]; then
+        PM_CATEGORY_TYPE="STATS"
+    fi
+    if [[ "${REPLAY_ENABLED}" == "true" ]]; then
+        PM_CATEGORY_TYPE="${PM_CATEGORY_TYPE}|REPLAY"
+    fi
+    PM_CATEGORY_TYPE=$(echo "$PM_CATEGORY_TYPE" | sed 's/^|//')
+fi
+touch "/netsim_users/pms/config/touch_files/${touch_epoch_format},${PM_CATEGORY_TYPE}"
+
+
+log "End ${STARTDATE_UTC}"
+
+#Toplogy genration for OSS_Simulator
+if [[ -f /netsim/ERICCMTopology/.toplogyrolloutcheck && ${edeStatsCheck} == "False" && ${OSS_enabled} == "True" ]]; then
+    /netsim/ERICCMTopology/Topology_Generator/bin/topology_gen.sh  >> /netsim/ERICCMTopology/Topology_Generator/topology_gen.log &
+fi
+
+
+#./genStats -r 15 >> <log file>
+#./genStats -r 60 -l "RNC" >> <log file>
+
+#0,15,30,45 * * * * /netsim_users/pms/bin/genStats >> /netsim_users/pms/logs/genStats.log 2>&1
+#0,15,30,45 * * * * /netsim_users/pms/bin/genStats -r 15   >> /netsim_users/pms/logs/genStats_15min.log 2>&1
+#0 * * * * /netsim_users/pms/bin/genStats -r 60 -l "RNC" >> /netsim_users/pms/logs/genStats_60min.log 2>&1
+

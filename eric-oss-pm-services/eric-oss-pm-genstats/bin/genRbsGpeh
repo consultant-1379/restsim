@@ -1,0 +1,192 @@
+#!/bin/bash
+
+################################################################################
+# COPYRIGHT Ericsson 2017
+#
+# The copyright to the computer program(s) herein is the property of
+# Ericsson Inc. The programs may be used and/or copied only with written
+# permission from Ericsson Inc. or in accordance with the terms and
+# conditions stipulated in the agreement/contract under which the
+# program(s) have been supplied.
+################################################################################
+
+###################################################
+# Version no    :  NSS 17.13
+# Purpose       :  Script to generate ROPs for RBS GPEH nodes
+# Jira No       :  NSS-13017
+# Gerrit Link   :  https://gerrit.ericsson.se/#/c/2518625/
+# Description   :  Genstats not generating File For GPEH
+# Date          :  07/25/2017
+# Last Modified :  tejas.lutade@tcs.com
+####################################################
+
+# This script is responsible for generating GPEH for RBS nodes.
+#RBS_GPEH_WORKLOAD_LIST="<SIM Name>:<RBS RANGE>[,<RBS RANGE>]"
+#RBS_GPEH_WORKLOAD_LIST="RNC04:10-12"
+#0,15,30,45 12-14 * * * /netsim_users/pms/bin/genRbsGpeh -l <SIMs List>  >> /netsim_users/pms/logs/genRbsGpeh.log 2>&1
+
+processNodeB()
+{
+    RNC_NAME=$1
+    RBS_NAME=$2
+    NE_PM_DIR=`printf ${PM_DIR} ${RNC_NAME} ${RBS_NAME}`
+
+    # Create sub file directory
+    MP_DIR=`printf "${NE_PM_DIR}/p00%02d00" 1`
+    if [ ! -d ${MP_DIR} ] ; then
+    mkdir -p ${MP_DIR}
+    fi
+
+    # Create sub file (symbolic link to the template)
+    if [ ! -f ${MP_DIR}/${SUB_FILENAME} ]; then
+        ln -s ${RBS_GPEH_TEMPLATE} ${MP_DIR}/${SUB_FILENAME}
+    fi
+
+    #
+    # Create the Main file
+    #
+
+    SUB_DIR="/c/pm_data"
+    ${MAKE_GPEH} --compressed --output "${NE_PM_DIR}/${MAIN_FILENAME}" --date ${STARTDATE} --type main \
+    --fmtver "${RBS_FMT_VER}" --subdir ${SUB_DIR} --numsub 1
+    gzip ${NE_PM_DIR}/${MAIN_FILENAME}
+
+}
+
+#Main
+
+ROOT_DIR=`dirname $0`
+. ${ROOT_DIR}/functions
+
+
+if [ -r /netsim/netsim_cfg ] ; then
+    . /netsim/netsim_cfg > /dev/null 2>&1
+fi
+
+OUT_ROOT=/netsim_users
+if [ -d /pms_tmpfs ] ; then
+   OUT_ROOT=/pms_tmpfs
+fi
+
+ENV_TYPE=0
+ROP_MIN=15
+
+while getopts  "r:v:l:x:" flag
+do
+    case "$flag" in
+    r) ROP_MIN="$OPTARG";;
+    v) ENV_TYPE="$OPTARG";;
+    l) LIST="$OPTARG";;
+    x) EXEC_FROM_HC="$OPTARG";;
+    *) printf "Usage: %s -l <List of simulation names> \n" $0
+           exit 1;;
+    esac
+done
+
+if [ -z ${ROP_MIN} ] ; then
+    ROP_MIN=15
+fi
+
+# Generate Epoch Seconds (UTC always)
+current_epoch=$(date +%s)
+
+ROP_PERIOD_SEC=$((${ROP_MIN}*60))
+
+if [[ ${EXEC_FROM_HC} == "YES" ]]; then
+    start_epoch=$(($((${current_epoch}/60))*60))
+elif [[ ${ROP_PERIOD_SEC} -gt 900 ]];then
+    start_epoch=$(($((${current_epoch}/900))*900))
+else
+    start_epoch=$(($((${current_epoch}/${ROP_PERIOD_SEC}))*${ROP_PERIOD_SEC}))
+fi
+end_epoch=$((${start_epoch}+${ROP_PERIOD_SEC}))
+
+ROP_START_DATE=$(date -u -d @${start_epoch} +'%Y%m%d')
+ROP_START_TIME=$(date -u -d @${start_epoch} +'%H%M')
+ROP_END_TIME=$(date -u -d @${end_epoch} +'%H%M')
+
+STARTDATE="${ROP_START_DATE}${ROP_START_TIME}"
+ENDDATE="${ROP_START_DATE}${ROP_END_TIME}"
+
+log "Start ${STARTDATE}"
+
+#Build GPEH main and sub file name
+MAIN_FILENAME="A${ROP_START_DATE}.${ROP_START_TIME}-${ROP_END_TIME}_gpehfile:2.lnk"
+SUB_FILENAME="A${ROP_START_DATE}.${ROP_START_TIME}-${ROP_END_TIME}_GPEH.lnk.gz"
+
+SOURCE_SUB_FILE_DIR=/netsim_users/pms/gpeh_templates
+
+if [ ${ENV_TYPE} -eq 1 ] ; then
+SOURCE_SUB_FILE_DIR=/pms_tmpfs/xml_step/gpeh_templates
+fi
+
+PM_DIR="${OUT_ROOT}/%s/%s/c/pm_data"
+PM_DIR_FOLDER_COUNT="${OUT_ROOT}/%s"
+
+# As of W10, all RBSs seem to use " 3- 0"
+# Using old FMT version
+RBS_FMT_VER=" 3- 0"
+
+
+
+MAKE_GPEH="${ROOT_DIR}/makeGpeh"
+if [ ! -x ${MAKE_GPEH} ] ; then
+    echo "ERROR: Cannot file ${MAKE_GPEH}"
+    exit 1
+fi
+
+LINK_GPEH_TEMPLATE_DIR=/pms_tmpfs/xml_step/gpeh_templates
+NETSIM_GPEH_TEMPLATE_DIR=/netsim_users/pms/gpeh_templates
+if [[ ! -d ${LINK_GPEH_TEMPLATE_DIR} ]] ; then
+   if [[ -d ${NETSIM_GPEH_TEMPLATE_DIR} ]];then
+       mkdir -p ${LINK_GPEH_TEMPLATE_DIR} ;
+       log "INFO : Copying GPEH templates from ${NETSIM_GPEH_TEMPLATE_DIR} to ${LINK_GPEH_TEMPLATE_DIR}"
+       cp -rf ${NETSIM_GPEH_TEMPLATE_DIR}/* ${LINK_GPEH_TEMPLATE_DIR}/
+   fi
+fi
+
+RBS_GPEH_TEMPLATE="${SOURCE_SUB_FILE_DIR}/rbs_gpeh.bin.gz"
+if [ ! -r ${RBS_GPEH_TEMPLATE} ] ; then
+    echo "ERROR: Cannot find RBS GPEH template file ${RBS_GPEH_TEMPLATE}"
+    exit 1
+fi
+
+for SIM in ${LIST} ; do
+  if grep -q ${SIM} "/tmp/showstartednodes.txt"; then
+  #RBS_GPEH_WORKLOAD_LIST="<SIM Name>:<RBS RANGE>[,<RBS RANGE>]"
+  #RBS_GPEH_WORKLOAD_LIST="RNC04:10-12,15,20-50"
+  for RBS_GPEH_WORKLOAD in ${RBS_GPEH_WORKLOAD_LIST}; do
+
+    SIM_NAME=`echo ${RBS_GPEH_WORKLOAD} | awk -F: '{print $1}'`
+    if [ ${SIM} = ${SIM_NAME} ] ; then
+
+        NE_PM_DIR_LOCAL=`printf ${PM_DIR_FOLDER_COUNT} ${SIM}`
+        FIRST_RBS_NODE=$(ls ${NE_PM_DIR_LOCAL}| grep ${SIM}RBS | sort -n -t "S" -k 2 | head -1)
+        NE_MIN=`echo ${FIRST_RBS_NODE#*${SIM}RBS}`
+        NE_MAX=`echo ${RBS_GPEH_WORKLOAD} | awk -F: '{print $3}'`
+
+        if [ ${ENV_TYPE} -eq 1 ] ; then
+            NE_MAX=`ls ${NE_PM_DIR_LOCAL} | grep "${SIM}RBS" | wc -l`
+        fi
+        NE_MAX_INDEX=$((${NE_MIN}+${NE_MAX}-1))
+        if [ ${NE_MAX_INDEX} -gt 0 ] ; then
+            INDEX=${NE_MIN}
+            while [ ${INDEX} -le ${NE_MAX_INDEX} ] ; do
+                RBS=`printf "${SIM}RBS%02d" ${INDEX}`
+                let "INDEX = ${INDEX} + 1"
+                # Check node directories, Node directories will not be present if node is stopped
+                if ! [[ -d ${NE_PM_DIR_LOCAL}/${RBS} ]];then
+                    echo "WARNING : Node directory ${RBS} not present for ${SIM}"
+                    continue
+                fi
+                processNodeB ${SIM} ${RBS}
+            done
+        fi
+    fi
+  done
+  fi
+done
+
+
+log "End ${STARTDATE}"
+

@@ -1,0 +1,45 @@
+#!/bin/bash
+
+################################################################################
+# COPYRIGHT Ericsson 2017
+#
+# The copyright to the computer program(s) herein is the property of
+# Ericsson Inc. The programs may be used and/or copied only with written
+# permission from Ericsson Inc. or in accordance with the terms and
+# conditions stipulated in the agreement/contract under which the
+# program(s) have been supplied.
+################################################################################
+
+###################################################
+# Version no    :  NSS 17.9
+# Purpose       :  Script to get started nodes information and write it to showstarted.txt
+# Jira No       :  NSS-11953
+# Gerrit Link   :  https://gerrit.ericsson.se/#/c/2289656/
+# Description   :  Handling for /tmp/showstartednodes.txt file.
+# Date          :  5/02/2017
+# Last Modified :  abhishek.mandlewala@tcs.com
+####################################################
+
+#This Script is responsible to get the started nodes on netsim and netypes of the nodes
+#This scripts is periodically executed by cron process as part of crontab entry
+
+#Fetch started nodes details and store them in temp files"
+
+if [ -r "/tmp/.showstartednodes.txt" ]; then
+    mv /tmp/.showstartednodes.txt /tmp/showstartednodes.txt
+else
+    `echo '.show started' | /netsim/inst/netsim_pipe > /tmp/.showstartednodes.txt`
+    mv /tmp/.showstartednodes.txt /tmp/showstartednodes.txt
+fi
+
+if [ -r "/tmp/.netypes.txt" ]; then
+    mv /tmp/.netypes.txt /tmp/netypes.txt
+else
+    `echo '.show netypes' | /netsim/inst/netsim_pipe > /tmp/.netypes.txt`
+    mv /tmp/.netypes.txt /tmp/netypes.txt
+fi
+
+`echo '.show started' | /netsim/inst/netsim_pipe > /tmp/.showstartednodes.txt`
+`echo '.show netypes' | /netsim/inst/netsim_pipe > /tmp/.netypes.txt`
+
+python /netsim_users/auto_deploy/bin/fetchFileLocation.py

@@ -1,0 +1,305 @@
+#!/usr/bin/env perl
+use strict;
+use Getopt::Long;
+use Data::Dumper;
+
+our $DEBUG = 0;
+
+our $SINGLE_VALUE = 1;
+our $MULTI_VALUE = 2;
+
+our $RESET = 1;
+our $MONOTONIC = 2;
+our $ISCOMPRESSED = 3;
+
+our @limitSimTypeList = ("MGW");
+
+main();
+
+sub main
+{
+
+    my $randRange = 300;
+
+    my ($inFile,$outFile,$propsFile,$pdfLimit,$simType);
+    my $result = GetOptions(
+                "inFile=s" =>\$inFile,
+                "outFile=s" =>\$outFile,
+                "cntrprops=s" => \$propsFile,
+                "rand=n" =>\$randRange,
+                "debug=n" => \$DEBUG,
+                "pdfLimit=n" => \$pdfLimit,
+                "simType=s" => \$simType
+                );
+    ( $result == 1 ) or die("Invalid Args");
+
+    my %cntrProps = ();
+    readPropsFile( $propsFile, \%cntrProps );
+
+    if ( $inFile eq "-" )
+    {
+        open INPUT, "<&STDIN";
+    }
+    else
+    {
+        open INPUT, $inFile or die "Could not open inFile $inFile";
+    }
+
+    if ( $outFile eq "-" )
+    {
+        open OUTPUT, ">&STDOUT";
+    }
+    else
+    {
+        open OUTPUT, ">$outFile" or die "Could not open outFile $outFile";
+    }
+
+    if ($inFile =~ /NR/) {
+        $randRange = 100;
+    }
+    my @cntrNames = ();
+    my @mdCntrs = ();
+    my $cntrIndex = 0;
+    while ( my $line = <INPUT> )
+    {
+        if ( $DEBUG > 9 )
+        {
+            print "input line :$line";
+        }
+        if (( index($line, "\<r\>") != -1 ) || ( index($line, "\<r p\=") != -1 ))
+        {
+            ($#mdCntrs != -1) or die "No counter behaviour found";
+
+            my $currVal;
+            if ( $line =~ /^\<r\>([\d,]+)\<\/r\>$/ || $line =~ /\<r p=\"[\d]+\"\>(\S+)\<\/r\>/ ) {
+                $currVal = $1;
+            }
+
+            if ( $DEBUG > 5 )
+            {
+                print Dumper("counter currVal=$currVal, cntrIndex=$cntrIndex mdCntrs[$cntrIndex]", $mdCntrs[$cntrIndex]);
+            }
+
+            if ( $line =~ /\<r\>/ )
+            {
+                $line = "<r>";
+            }
+            else
+            {
+                my ($preFix) = $line =~ /(.+)\>(\S+)\<\/r\>/ ;
+                $line = "$preFix>";
+            }
+            if ( $mdCntrs[$cntrIndex]->{'type'} == $SINGLE_VALUE && $mdCntrs[$cntrIndex]->{'compressed'} != $ISCOMPRESSED )
+            {
+                $line .= getCounterValue($currVal, $randRange, $mdCntrs[$cntrIndex], 0, $simType );
+
+            }
+            else
+            {
+                if($mdCntrs[$cntrIndex]->{'compressed'} == $ISCOMPRESSED)
+                {
+                    my $x = 1 + int(rand($pdfLimit));
+                    $line .=  $x;
+                    for (my $i=0; $i < $x; $i++)
+                    {
+                        $line .=  ",";
+                        $line .=  $i;
+                        $line .=  ",";
+                        $line .= 1 + int(rand(99));
+                    }
+                }
+                else
+                {
+                    if ( $currVal eq '' ) {
+                        $line .= 0;
+                    }
+                    else {
+                    my $index = 0;
+                    foreach my $cVal ( split(/,/, $currVal) )
+                    {
+                        if ( $index != 0 )
+                        {
+                            $line .=  ",";
+                        }
+                        $line .= getCounterValue($currVal, $randRange, $mdCntrs[$cntrIndex], $index, $simType);
+                        $index++;
+                    }
+                    }
+            }
+        }
+        $line .= "</r>\n";
+        $cntrIndex++;
+    }
+    elsif ( $line =~ /^\<moid/ || $line =~ /\<measValue measObjLdn/ )
+    {
+        $cntrIndex = 0;
+
+        # If this is the first MO, then we need to figure out
+        # the MO type so we can 'scope' the counter names to
+        # an MoType
+        if ( $#mdCntrs = -1 )
+        {
+            my $moType;
+            my $lastElement;
+
+            if ( $line =~ /<\/moid>/ ){
+                $lastElement =  (split /</, (split /,/, $line)[-1])[0];
+            } else {
+                $lastElement =  (split /\"/, (split /,/, $line)[-1])[0];
+            }
+
+            if ( index( $lastElement, "=" ) != -1 ){
+                if ( index( $lastElement, "PmGroup" ) != -1 ){
+                    $moType = (split /=/, $lastElement)[-1];
+                } else {
+                    $moType = (split /=/, $lastElement)[0];
+                }
+            } else {
+                $moType = $lastElement;
+            }
+
+            if ( $DEBUG > 6 )
+            {
+                print "moType = $moType\n";
+            }
+            foreach my $cntrName ( @cntrNames )
+            {
+                if ( ! exists $cntrProps{$moType}->{$cntrName} )
+                {
+                if ( $DEBUG > 0 )
+                {
+                    print "WARN: No counter def for $moType.$cntrName\n";
+                }
+            }
+            my $r_Cntr = {};
+            if ( $cntrProps{$moType}->{$cntrName}->{'behaviour'} eq 'RESET' )
+            {
+                $r_Cntr->{'behaviour'} = $RESET;
+            }
+            else
+            {
+                $r_Cntr->{'behaviour'} = $MONOTONIC;
+            }
+            if ( $cntrProps{$moType}->{$cntrName}->{'type'} eq 'MULTI_VALUE' )
+            {
+                $r_Cntr->{'type'} = $MULTI_VALUE;
+            }
+            else
+            {
+                $r_Cntr->{'type'} = $SINGLE_VALUE;
+            }
+            if ($cntrProps{$moType}->{$cntrName}->{'compressed'} eq 'COMPRESSED' )
+            {
+                $r_Cntr->{'compressed'} = $ISCOMPRESSED;
+            }
+
+            if ( exists $cntrProps{$moType}->{$cntrName}->{'fixed'} )
+            {
+                $r_Cntr->{'fixed'} = $cntrProps{$moType}->{$cntrName}->{'fixed'};
+            }
+
+            push @mdCntrs, $r_Cntr;
+
+            if ( $DEBUG > 7 )
+            {
+                print Dumper("cntrName=$cntrName r_Cntr", $r_Cntr );
+            }
+        }
+        }
+    }
+    elsif ( $line =~ /^\<mt\>(\S+)\<\/mt\>$/  || $line =~ /\<measType p=\"[\d]+\"\>(\S+)\<\/measType\>/ )
+    {
+        push @cntrNames, $1;
+        if ( $DEBUG > 7 )
+        {
+            print "added counter $cntrNames[$#cntrNames]\n";
+        }
+    }
+    elsif ( $line =~ /^\<gp\>/ ||  $line =~ /\<\/measInfo>/ )
+    {
+        $#mdCntrs = -1;
+        $#cntrNames = -1;
+    }
+
+    if ( $DEBUG > 9 )
+    {
+        print "output line:$line";
+    }
+    print OUTPUT $line or die "Failed to write $line";
+}
+
+    close INPUT;
+    close OUTPUT;
+}
+
+sub getCounterValue
+{
+    my ($currVal, $randRange,$r_mdCntr, $index, $simType) = @_;
+
+    # Check for fixed value counter
+    if ( exists $r_mdCntr->{'fixed'}->[$index] )
+    {
+        return $r_mdCntr->{'fixed'}->[$index];
+    }
+
+    my $value = int (rand($randRange) + 0.5);
+
+    my $newValue;
+    if ( $r_mdCntr->{'behaviour'} == $RESET )
+    {
+        $newValue = $value;
+    }
+    else{
+        if (grep $_ eq $simType, @limitSimTypeList){
+          if ( $currVal > 9 ){
+             $currVal = 1;
+          }
+          $newValue = $currVal + int (rand(8));
+        }
+        else{
+           $newValue = $currVal + $value;
+        }
+    }
+    return $newValue;
+}
+
+sub readPropsFile
+{
+    my ($propsFile,$r_CntrProp) = @_;
+    open PROPS, $propsFile or die "Cannot open $propsFile";
+    while ( my $line = <PROPS> )
+    {
+        chop $line;
+        my @fields = split(/,/, $line);
+        # Each line is MoType,cntrName,behaviour,type
+        $r_CntrProp->{$fields[0]}->{$fields[1]} = {
+        'behaviour' => $fields[2],
+        'type'      => $fields[3],
+        'compressed' => $fields[4]
+    };
+
+    if ( $#fields > 4 )
+    {
+        foreach my $cntrOpt ( split(/:/, $fields[5] ) )
+        {
+            if ( $cntrOpt =~ /^FIXED\[?(\d*)\]?=(\d+)/ )
+            {
+                my ( $pdfIndex, $value ) = ( $1, $2 );
+                if ( $fields[3] eq 'MULTI_VALUE' )
+                {
+                    $r_CntrProp->{$fields[0]}->{$fields[1]}->{'fixed'}->[$pdfIndex] = $value;
+                }
+                else
+                {
+                    $r_CntrProp->{$fields[0]}->{$fields[1]}->{'fixed'}->[0] = $value;
+                }
+            }
+            else
+            {
+                die "Unknown counter option $cntrOpt for $fields[0] $fields[1]";
+            }
+        }
+    }
+    }
+    close PROPS;
+}

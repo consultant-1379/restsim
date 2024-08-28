@@ -1,0 +1,43 @@
+#!/bin/bash
+
+################################################################################
+# COPYRIGHT Ericsson 2023
+#
+# The copyright to the computer program(s) herein is the property of
+# Ericsson Inc. The programs may be used and/or copied only with written
+# permission from Ericsson Inc. or in accordance with the terms and
+# conditions stipulated in the agreement/contract under which the
+# program(s) have been supplied.
+################################################################################
+
+
+callPmGenerationScript() {
+    for i in $(seq 0 ${FUTURE_ROP_COUNT}); do
+        ${PM_SCRIPT} -j ${CURRENT_EPOCH} -r 15 -f YES -o ${OUT_DIR} &
+        let "CURRENT_EPOCH=CURRENT_EPOCH+900"
+    done
+    wait
+}
+
+#################################### Main ##############################################
+
+# capturing current system epoch time in starting of script initialization
+
+ROP_PERIOD_MIN=15
+
+PM_SCRIPT="/netsim_users/pms/bin/genStats"
+OUT_DIR="/ericsson/pmic/FUTURE/"
+
+while getopts "f:e:" flag
+do
+    case "$flag" in
+        f) FUTURE_ROP_COUNT="$OPTARG";;
+        e) EPOCH="$OPTARG";;
+        *) printf "Usage: %s <-f future_rop_count>\n" $0
+           exit 1;;
+    esac
+done
+
+CURRENT_EPOCH=${EPOCH}
+
+callPmGenerationScript

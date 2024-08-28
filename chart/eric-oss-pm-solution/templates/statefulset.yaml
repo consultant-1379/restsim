@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "eric-oss-pm-solution.fullname" . }}
+  labels:
+    {{- include "eric-oss-pm-solution.selectorLabels" . | nindent 4 }}
+#Specificaiton for pod
+spec:
+  selector:
+    matchLabels:
+      {{- include "eric-oss-pm-solution.selectorLabels" . | nindent 6 }}
+  serviceName: {{ include "eric-oss-pm-solution.fullname" . }}
+  replicas: {{ .Values.replicaCount }}
+  template:
+    metadata:
+      labels:
+        {{- include "eric-oss-pm-solution.selectorLabels" . | nindent 8 }}
+    spec:
+      #Using a persistent Volume claim to 'mount' a directory on a pod
+      {{- if include "eric-oss-pm-solution.pullSecret" . }}
+      imagePullSecrets:
+        - name: {{ template "eric-oss-pm-solution.pullSecret" . }}
+      {{- end }}
+      containers:
+      - name: pm-generator
+        image: {{ include "eric-oss-pm-solution.imagePath" . }}
+        securityContext:
+          privileged: {{ .Values.securityContext.privileged }}
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: LOGGING_LEVEL
+          value: {{ include "eric-oss-pm-solution.loggingLevel" . | quote }}
+        - name: STATIC_PLAYBACK
+          value: "{{ .Values.playback }}"
+        - name: ON_DEMAND
+          value: "{{ .Values.on_demand }}"
+        - name: STATS_ENABLED
+          value: "{{ .Values.stats_enabled }}"
+        - name: CELLTRACE_ENABLED
+          value: "{{ .Values.celltrace_enabled }}"
+        - name: FUTURE_ENABLED
+          value: "{{ .Values.future_enabled }}"
+        - name: REPLAY_ENABLED
+          value: "{{ .Values.replay_enabled }}"
+        - name: EBSN_REPLAY_COUNTER_MAPPING
+          value: "{{ .Values.ebsn_replay_counter_mapping }}"
+        - name: EBSN_PERFORMANCE_ENABLED
+          value: "{{ .Values.ebsn_performance_enabled }}"
+        - name: PCC_PCG_FOR_ESOA
+          value: "{{ .Values.pcc_pcg_for_esoa.enabled }}"
+        - name: PCC_PCG_FOR_ESOA_PERFORMANCE
+          value: "{{ .Values.pcc_pcg_for_esoa.performance_mode }}"
+        - name: PLAYBACK_ENABLED
+          value: "{{ .Values.playback_enabled }}"
+        - name: CONCURRENCY
+          value: "{{ .Values.concurrency }}"
+        - name: custom_ctr
+          value: "{{ .Values.custom_ctr }}"
+        - name: custom_stats
+          value: "{{ .Values.custom_stats }}"
+        - name: POD_ENM_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        lifecycle:
+          postStart:
+            exec:
+              command: ["/bin/sh", "-c", "/setup_genstats.sh"]
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "/teardown.sh"]
+        volumeMounts:
+        #- name: pm-fls-pvc
+        #  mountPath: "/etc/config/"
+        - name: config-volume
+          mountPath: "/etc/config-map/"
+        - name: log
+          mountPath: "/netsim_users/pms/logs"
+#        - name: sftp
+#          mountPath: "/ericsson/pmic1/XML"
+      - name: logging-util
+        image: armdocker.rnd.ericsson.se/proj_oss_releases/enm/pm_logging_utility:v9
+        args: [/bin/sh, -c, './fetch_logs.sh']
+        volumeMounts:
+        - name: log
+          mountPath: /var/log
+#      - name: sftp-access
+#        image: armdocker.rnd.ericsson.se/proj_oss_releases/enm/pm_sftp:v1
+#        securityContext:
+#          privileged: {{ .Values.securityContext.privileged }}
+#        volumeMounts:
+#        - name: sftp
+#          mountPath: /ericsson/pmic1/XML/
+      volumes:
+        - name: config-volume
+          configMap:
+            name: {{ include "eric-oss-pm-solution.fullname" . }}
+        - name: log
+          emptyDir: {}
+#        - name: sftp
+#          emptyDir: {}
+#  volumeClaimTemplates:
+#  - metadata:
+#      name: pm-fls-pvc
+#    spec:
+#      accessModes: ["ReadWriteOnce"]
+#      resources:
+#        requests:
+#          storage: 1Gi
+
+

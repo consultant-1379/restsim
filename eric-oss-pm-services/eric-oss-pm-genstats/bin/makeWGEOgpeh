@@ -1,0 +1,262 @@
+#!/bin/bash
+
+
+ROOT_DIR=`dirname $0`
+. ${ROOT_DIR}/functions
+
+getRncMimVer()
+{
+    MY_RNC=$1
+
+    cat ${TMP_DIR}/mim_ver.txt | nawk -v rnc=${MY_RNC} '{if ($1 == rnc ) {print $2} }' | sed 's/\./_/g'
+}
+
+makeASC()
+{
+    MY_OUT_DIR=$1
+    MY_RNC_FFV=$2
+
+    cd ${MY_OUT_DIR}
+    
+    #gzip -dc ${GENERATOR_TGZ} | tar xf -
+    #tar xf ${GENERATOR_TGZ}
+    #chmod 755 filegenerator/genGpehFiles
+    #chmod 755 filegenerator/a2gpeh
+
+    log " Running genGpehFiles to generate ASC files for FFV ${MY_RNC_FFV}"
+    CMD="/opt/ericsson/brf/unsupported/tools.sh ${GEN_DIR}/genGpehFiles -v ${MY_RNC_FFV} -E 427:0,428:0,459:1"
+    $CMD
+    if [ $? -ne 0 ] ; then
+	echo "ERROR: genGpehFiles failed, cmd =$CMD"
+	exit 1
+    fi    
+}
+
+getValueForRNC() {
+    MY_RNC=$1
+    MY_DEFAULT=$2
+    MY_RANGE_LIST="$3"
+
+    MY_VALUE=$MY_DEFAULT
+    if [ ! -z "${MY_RANGE_LIST}" ] ; then
+	MY_RNC_NUM=`echo ${MY_RNC} | sed 's/^RNC//'`
+	for MY_RANGE in ${MY_RANGE_LIST} ; do
+	    RANGE_VALUE=`echo ${MY_RANGE} | awk -F: '{print $1}'`
+	    RANGE_MIN_RNC_NUM=`echo ${MY_RANGE} | awk -F: '{print $2}'`
+	    RANGE_MAX_RNC_NUM=`echo ${MY_RANGE} | awk -F: '{print $3}'`
+	    if [ ${MY_RNC_NUM} -ge ${RANGE_MIN_RNC_NUM} ] && [ ${MY_RNC_NUM} -le ${RANGE_MAX_RNC_NUM} ] ; then
+		MY_VALUE=${RANGE_VALUE}
+		break
+	    fi
+	done
+    fi
+
+    echo ${MY_VALUE}
+}
+
+printUsage() {
+    cat - <<EOF
+makeWGEOgpeh -f ossCfgFile -p ropPeroid -g genGpehFilesDir -c CellPerMP -e EventsPerCell [-r EventsPerCellRange] [-l CellLimitRange ] [-t tmpdir]
+Where
+ ossCfg
+   The cfg file to use. This contains various setting for the deployment
+ 
+ genGpehFilesDir
+   The directory containing the genGpehFiles, a2gpeh & gpeh2a (From RNO Design)
+
+ EventsPerCellRange allows you specify different events per cell for different RNCs, 
+    format is events:rnc start num:rnc end num. e.g. "100:1:50 200:51:55" gives 100 events per
+    cell for RNC01 to RNC50 and 200 events per cell for RNC51 to RNC55. If an RNC is not in this
+    list then the EventsPerlCell parameter value is used
+
+ CellLimitRange allows you specify the number of cells used in an RNC (by default all cells in an RNC are used). Format
+    is the same as EventsPerCellRange except first number of the number of cells to use. e.g. "10:1:82" "1000:83:83" gives
+    10 cells for RNC01 to RNC82 and 1000 cells for RNC83
+
+ ropPeroid
+  15 or 1 
+EOF
+}
+
+KEEP_TMP=0
+SKIP_IF_EXISTS=0
+TMP_ROOT=/tmp
+while getopts  "p:g:e:t:r:l:sf:k" flag
+do
+    case "$flag" in
+	f) OSS_MASTER_CFG="$OPTARG";;
+	p) ROP_PERIOD="$OPTARG";;
+	g) GEN_DIR="$OPTARG";;
+        e) EVENTS_PER_CELL="$OPTARG";;
+	r) EVENTS_PER_CELL_RANGE="$OPTARG";;
+        l) CELL_LIMIT_RANGE="${OPTARG}";;
+	t) TMP_ROOT="${OPTARG}";;
+	s) SKIP_IF_EXISTS=1;;
+	k) KEEP_TMP=1;;
+
+	*) printf "Usage: %s -o Output dir\n" $0
+           exit 1;;
+    esac
+done
+
+
+if [ -z "${GEN_DIR}" ] || [ ! -d ${GEN_DIR} ] ; then
+    echo "ERROR: You must specify the directory containing the genGpehFiles tools"
+    printUsage
+    exit 1
+fi
+if [ ! -r ${GEN_DIR}/genGpehFiles ] || [ ! -r ${GEN_DIR}/a2gpeh ] ; then
+    echo "ERROR: ${GEN_DIR} does not seem to contain genGpehFiles and a2gpeh"
+    printUsage
+    exit 1
+fi
+
+if [ -z "${ROP_PERIOD}" ] ; then
+    echo "ERROR: You must specify the ROP_PERIOD"
+    exit 1
+fi
+
+if [ -z "${OSS_MASTER_CFG}" ] ; then
+    echo "ERROR: cfg file not specified"
+    exit 1
+fi
+
+if [ -r ${OSS_MASTER_CFG} ] ; then
+    . ${OSS_MASTER_CFG} > /dev/null 2>&1
+else
+    echo "ERROR: Cannot file OSS cfg file ${OSS_MASTER_CFG}"
+    exit 1
+fi
+
+
+checkPMDIR
+if [ $? -ne 0 ] ; then
+    log "ERROR: PMDIR not set correctly"
+    exit 1
+else
+    OUT_DIR=${PMDIR}/gpeh_templates/${ROP_PERIOD}
+fi
+
+if [ ! -d "${TMP_ROOT}" ] ; then
+    echo "ERROR: tmp directory \"${TMP_ROOT}\" does not exist"
+    printUsage
+    exit 1
+fi
+
+TMP_DIR=${TMP_ROOT}/makegeow
+if [ ! -d ${TMP_DIR} ] ; then
+    mkdir ${TMP_DIR}
+fi
+
+if [ ! -d "${OUT_DIR}" ] ; then
+    echo "Creating ${OUT_DIR}"
+    mkdir ${OUT_DIR}
+fi
+
+if [ -z "${EVENTS_PER_CELL}" ] && [ -z "${EVENTS_PER_CELL_RANGE}" ] ; then
+    echo "ERROR: You must specify the events per Cell"
+    printUsage
+    exit 1
+fi
+
+if [ ! -r ${TMP_DIR}/mim_ver.txt ] ; then
+    log "Get MIM Versions"
+    /opt/ericsson/nms_cif_cs/etc/unsupported/bin/cstest -s Seg_masterservice_CS lt MeContext -f '$.neMIMName==RNC_NODE_MODEL' -an neMIMversion | \
+	awk '{if ( $1 ~ /^Sub/ ) { rnc=$1 } else if ( $2 ~ /^neMIMversion/ ) { print rnc, $6; } }' | \
+	sed 's/^[^ ]*MeContext=//' | sed 's/"v//' | sed 's/"//g' > ${TMP_DIR}/mim_ver.txt
+fi
+
+RNC_LIST=`cat ${TMP_DIR}/mim_ver.txt | awk '{print $1}' | sort -n`
+
+for RNC in ${RNC_LIST} ; do
+    if [ ${SKIP_IF_EXISTS} -eq 1 ] && [ -r ${OUT_DIR}/${RNC}.wgeo_templates.tar.gz ] ; then
+	log "INFO: File already exists for ${RNC}"
+	continue
+    fi
+
+    RNC_MIM_VER=`getRncMimVer $RNC`
+    RNC_FFV=$(eval "echo \$$(echo ${RNC_MIM_VER}_RNC_FMT_VER)")
+    if [ -z "${RNC_FFV}" ] ; then
+	exit 1
+    fi
+    RNC_FFV_NUM=`echo ${RNC_FFV} | sed 's/ //g' | sed 's/-/\./'`
+    ASC_FILE=${TMP_DIR}/${RNC_FFV_NUM}/${RNC}.asc
+    if [ ! -r  ${ASC_FILE} ] ; then  
+	mkdir ${TMP_DIR}/${RNC_FFV_NUM}
+	makeASC ${TMP_DIR}/${RNC_FFV_NUM} ${RNC_FFV_NUM}
+    fi
+
+    RNC_EVENTS_PER_CELL=`getValueForRNC ${RNC} ${EVENTS_PER_CELL} "${EVENTS_PER_CELL_RANGE}"`
+    RNC_CELL_LIMIT=`getValueForRNC ${RNC} 0 "${CELL_LIMIT_RANGE}"`
+
+    log "Starting RNC ${RNC} FFV=${RNC_FFV_NUM} Events/Cell=${RNC_EVENTS_PER_CELL} Cell Limit=${RNC_CELL_LIMIT}"
+
+    RNC_MP_DIR=${TMP_DIR}/${RNC}_MP
+    mkdir ${RNC_MP_DIR}
+
+    cat ${ASC_FILE} | \
+	sed -e 's/^random6.*/random6 45 91/' -e 's/^random16.*/random16 20000 20100/' > \
+	${TMP_DIR}/${RNC}.asc.fixrand
+
+    log " Extract cell Ids"
+    grep cId1 ${TMP_DIR}/${RNC}.asc.fixrand | grep -v rncId1 | awk '{print $2}' | sort -un > ${RNC_MP_DIR}/cid.txt
+
+    NUM_CELLS=`wc -l ${RNC_MP_DIR}/cid.txt | awk '{print $1}'` 
+
+    NE_NUM_SUB_FILES=`getNumSubFiles ${RNC} ${NUM_CELLS}`
+    if [ $? -ne 0 ] ; then
+	log "ERROR: Failed to get number of MPs for ${RNC}"
+	exit 1
+    fi
+
+    ACTUAL_GPEH_CELLS_PER_MP=`expr ${NUM_CELLS} / ${NE_NUM_SUB_FILES}`
+
+    log " ${NUM_CELLS} cells so we need ${NE_NUM_SUB_FILES} files with Cell/File Ratio of ${ACTUAL_GPEH_CELLS_PER_MP}"
+
+    log " Split ASC"
+    LIMIT_ARG=""
+    if [ ${RNC_CELL_LIMIT} -gt 0 ] ; then
+	LIMIT_ARG="--limitcells ${RNC_CELL_LIMIT}"
+    fi
+    SPLIT_CMD="${ROOT_DIR}/splitWNCSascii --in ${TMP_DIR}/${RNC}.asc.fixrand --outdir ${RNC_MP_DIR} --cellmp ${ACTUAL_GPEH_CELLS_PER_MP} --epc ${RNC_EVENTS_PER_CELL} ${LIMIT_ARG}"
+    ${SPLIT_CMD}
+    if [ $? -ne 0 ] ; then
+	echo "ERROR: Split failed, cmd = $CMD"
+	exit 1
+    fi
+
+    # Verify we have an asc file for each MP
+    MP_INDEX=1
+    while [ ${MP_INDEX} -le ${NE_NUM_SUB_FILES} ] ; do
+	if [ ! -r ${RNC_MP_DIR}/${MP_INDEX}.asc ] ; then
+	    echo "ERROR: ${RNC_MP_DIR}/${MP_INDEX}.asc missing"
+	    exit 1
+	fi
+	MP_INDEX=`expr ${MP_INDEX} + 1`
+    done
+
+
+    MP_INDEX=1
+    while [ ${MP_INDEX} -le ${NE_NUM_SUB_FILES} ] ; do
+	MSG=`printf " Start Encoding ASC for MP %2d" ${MP_INDEX}`
+	log "${MSG}"
+	${GEN_DIR}/a2gpeh < ${RNC_MP_DIR}/${MP_INDEX}.asc > ${RNC_MP_DIR}/${RNC}_mp${MP_INDEX}_gpeh_sub.bin &
+	MP_INDEX=`expr ${MP_INDEX} + 1`
+    done
+    log " Waiting for all encodings to complete"
+    wait
+
+    log " Tarring Generated files"
+    `cd ${RNC_MP_DIR} ; tar cf - ${RNC}*.bin | gzip > ${OUT_DIR}/${RNC}.wgeo_templates.tar.gz`
+
+    if [ ${KEEP_TMP} -eq 0 ] ; then
+	rm -rf ${RNC_MP_DIR} ${TMP_DIR}/${RNC}.asc.fixrand
+    fi
+done
+
+cd /
+if [ ${KEEP_TMP} -eq 0 ] ; then
+    rm -rf ${TMP_DIR}
+fi
+
+log "Done"

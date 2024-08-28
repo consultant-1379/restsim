@@ -1,0 +1,168 @@
+#!/bin/sh
+
+#eniq_stats_cfg
+#This file is responsible for initialization of all input(user-defined) variables required for each NE Type with respect to Stats and Events as one time activity for Playbacker Framework.
+#{} mentioned for variables which user can defined as per requirement.
+#NOTE: Please use # for comment.
+
+######## Filter Parameter and range ############
+wranLteFlexFilerFormatTag="Plmn:UeCat:Arp:LCG"
+wranLteFlexFilterRangesTag="0-1:0-2:0-3:0-4"
+
+###### LIST OF CONSTANTS used in oss simulator ######
+
+#######MSRBS_V2 Variables##############
+LTE_MSRBS_V2_FDN_OSS="SubNetwork=SUBNW-1,MeContext="
+WRAN_MSRBS_V2_FDN_OSS="SubNetwork=SUBNW-1,MeContext="
+LTE_MSRBS_V2_LINK_PATH_OSS="RadioNode/LRAT/"
+WCDMA_MSRBS_V2_LINK_PATH_OSS="RadioNode/WRAT/"
+
+#######MSRBS_V1(MSRBS_V1) Variables##############
+LTE_MSRBS_V1_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=SUBNW-1,MeContext="
+WRAN_MSRBS_V1_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=SUBNW-1,MeContext="
+LTE_MSRBS_V1_LINK_PATH_OSS="Msrbs_V1/MIXED/"
+WCDMA_PRBS_LINK_PATH_OSS="Msrbs_V1/MIXED/"
+
+#######ERBS Variables LTE ##############
+ERBS_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=SUBNW-1,MeContext="
+LTE_ERBS_LINK_PATH_OSS="lterbs/dir1/"
+
+#######RNC Variables##############
+RNC_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=RNC_NODE_NAME,MeContext=RNC_NODE_NAME"
+WCDMA_RNC_LINK_PATH_OSS="rnc/dir1/"
+
+#######RNC Variables##############
+RBS_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=RNC_NODE_NAME,MeContext=RBS_NODE_NAME"
+WCDMA_RBS_LINK_PATH_OSS="rbs/dir1/"
+
+#######MGW Variables##############
+MGW_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=MGW,MeContext=NODENAME,ManagedElement=1"
+MGW_REALFILE_PATH="/ossrc/data/sgw/sgwcg/xml/mgw/"
+MGW_LINK_PATH_OSS="mgw/"
+MGW_FILECOMPRESSION="NO"
+
+#######SGSN Variables##############
+SGSN_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=SGSN,ManagedElement="
+SGSN_REALFILE_PATH="/ossrc/data/sgw/sgwcg/xml/gsn/"
+SGSN_LINK_PATH_OSS="sgsn_mme_cba/"
+SGSN_FILECOMPRESSION="NO"
+
+#######EME Variables##############
+EME_FDN_OSS="SubNetwork=ONRM_ROOT_MO,ManagedElement="
+EME_REALFILE_PATH="/ossrc/data/pms/segment1/eme"
+EME_LINK_PATH_OSS="vEME_XML/"
+EME_FILECOMPRESSION="NO"
+
+#######WMG Variables##############
+WMG_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=WMG,ManagedElement="
+WMG_REALFILE_PATH="/ossrc/data/sgw/sgwcg/xml/wmg/"
+WMG_LINK_PATH_OSS="wmg/"
+WMG_FILECOMPRESSION="NO"
+
+#######UPG Variables##############
+UPG_FDN_OSS="SubNetwork=ONRM_ROOT_MO,MeContext="
+UPG_REALFILE_PATH="/ossrc/ericsson/ccpdm/pm_storage/upg"
+UPG_LINK_PATH_OSS="UPG/"
+UPG_FILECOMPRESSION="NO"
+
+#######MRFV Variables##############
+MRFV_FDN_OSS="SubNetwork=ONRM_ROOT_MO,MeContext="
+MRFV_REALFILE_PATH="/ossrc/data/pms/segment1/MRFV"
+MRFV_LINK_PATH_OSS="MRF_CBA/"
+MRFV_FILECOMPRESSION="NO"
+
+#######IPWORKS Variables##############
+IPWORKS_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=IPWorks_PM,ManagedElement="
+IPWORKS_REALFILE_PATH="/ossrc/data/sgw/sgwcg/xml/ipworks-ecim"
+IPWORKS_LINK_PATH_OSS="IPWORKS_CBA/"
+IPWORKS_FILECOMPRESSION="NO"
+
+#######HSS_FE Variables##############
+HSS_FE_FDN_OSS="SubNetwork=ONRM_ROOT_MO,MeContext="
+HSS_FE_REALFILE_PATH="/ossrc/ericsson/ccpdm/pm_storage/HSSECIM"
+HSS_FE_LINK_PATH_OSS="HSS_CBA/"
+HSS_FE_FILECOMPRESSION="NO"
+
+#######EPG-SSR Variables##############
+EPG_SSR_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=NetSim303_GGSN,ManagedElement="
+EPG_SSR_REALFILE_PATH="/ossrc/data/pms/segment1/EPG-SSR"
+EPG_SSR_LINK_PATH_OSS="ggsn-mpg-xml/"
+EPG_SSR_FILECOMPRESSION="NO"
+
+#######EPG-EVR Variables##############
+EPG_EVR_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=NetSim303_GGSN,ManagedElement="
+EPG_EVR_REALFILE_PATH="/ossrc/data/pms/segment1/EPG-EVR"
+EPG_EVR_LINK_PATH_OSS="ggsn-mpg-xml/"
+EPG_EVR_FILECOMPRESSION="NO"
+
+#######WCG Variables##############
+WCG_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=WCG_PM,ManagedElement="
+WCG_REALFILE_PATH="/ossrc/ericsson/ccpdm/pm_storage/WCG"
+WCG_LINK_PATH_OSS="WCG/"
+WCG_FILECOMPRESSION="NO"
+
+#######SBG Variables##############
+SBG_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=IS,ManagedElement="
+SBG_REALFILE_PATH="/ossrc/ericsson/ccpdm/pm_storage/isgw/sbgCOMECIM"
+SBG_LINK_PATH_OSS="SBG_CBA/"
+SBG_FILECOMPRESSION="NO"
+
+#######MTAS Variables##############
+MTAS_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=TSP,ManagedElement="
+MTAS_REALFILE_PATH="/ossrc/ericsson/ccpdm/pm_storage/MtasNormal"
+MTAS_LINK_PATH_OSS="MTAS_CBA/"
+MTAS_FILECOMPRESSION="NO"
+
+#######CSCF Variables##############
+CSCF_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=TSP,ManagedElement="
+CSCF_REALFILE_PATH="/ossrc/ericsson/ccpdm/pm_storage/CSCF/" 
+CSCF_LINK_PATH_OSS="cscf/"
+CSCF_FILECOMPRESSION="NO"
+
+#######SAPC Variables##############
+SAPC_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=TSP,ManagedElement="
+SAPC_REALFILE_PATH="/ossrc/ericsson/ccpdm/pm_storage/sapcEcim"
+SAPC_LINK_PATH_OSS="sapc-ecim/"
+SAPC_FILECOMPRESSION="NO"
+
+#######DSC Variables##############
+DSC_FDN_OSS="SubNetwork=ONRM_ROOT_MO,ManagedElement="
+DSC_REALFILE_PATH="/ossrc/ericsson/ccpdm/pm_storage/dsc"
+DSC_LINK_PATH_OSS="dsc/"
+DSC_FILECOMPRESSION="NO"
+
+#######BBSC Variables##############
+BBSC_FDN_OSS="SubNetwork=ONRM_ROOT_MO,ManagedElement="
+BBSC_REALFILE_PATH="/ossrc/data/pms/segment1/BBSC/"
+BBSC_LINK_PATH_OSS="bbsc/"
+BBSC_FILECOMPRESSION="NO"
+
+#######BSP Variables##############
+BSP_FDN_OSS="SubNetwork=ONRM_ROOT_MO,MeContext="
+BSP_REALFILE_PATH="/ossrc/data/pms/segment1/BSP/"
+BSP_LINK_PATH_OSS="bsp/"
+BSP_FILECOMPRESSION="NO"
+
+#######BBSC Variables##############
+BBSC_FDN_OSS="SubNetwork=ONRM_ROOT_MO,MeContext="
+BBSC_REALFILE_PATH="/ossrc/ericsson/ccpdm/pm_storage/BBSC/"
+BBSC_LINK_PATH_OSS="BBSC/"
+BBSC_FILECOMPRESSION="NO"
+
+#######ESASN Variables##############
+ESASN_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=SASN,ManagedElement="
+ESASN_REALFILE_PATH="/ossrc/ericsson/ccpdm/pm_storage/SASN/"
+ESASN_LINK_PATH_OSS="sasn/"
+ESASN_FILECOMPRESSION="NO"
+
+#######SDNCP Variables##############
+SDNC_P_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=SDNC-P,ManagedElement="
+SDNC_P_REALFILE_PATH="/ossrc/ericsson/ccpdm/pm_storage/SDNCP"
+SDNC_P_LINK_PATH_OSS="SDNC-P/"
+SDNC_P_FILECOMPRESSION="NO"
+
+#######MRSV(BGF) Variables##############
+MRSV_FDN_OSS="SubNetwork=ONRM_ROOT_MO,SubNetwork=BGF,MeContext="
+MRSV_REALFILE_PATH="/ossrc/ericsson/ccpdm/pm_storage/BGF/"
+MRSV_LINK_PATH_OSS="BGF_CBA/"
+MRSV_FILECOMPRESSION="NO"

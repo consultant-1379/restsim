@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "eric-oss-pm-solution.fullname" . }}-test-connection"
+  labels:
+    {{- include "eric-oss-pm-solution.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      args: ['{{ include "eric-oss-pm-solution.fullname" . }}:2020']
+  restartPolicy: Never
+

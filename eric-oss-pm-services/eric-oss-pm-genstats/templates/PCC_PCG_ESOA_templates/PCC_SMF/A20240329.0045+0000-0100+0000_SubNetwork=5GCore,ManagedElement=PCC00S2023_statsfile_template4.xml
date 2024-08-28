@@ -1,0 +1,84 @@
+<?xml version='1.0' encoding='utf-8'?>
+<?xml-stylesheet type="text/xsl" href="MeasDataCollection.xsl"?>
+<measCollecFile xmlns="http://www.3gpp.org/ftp/specs/archive/32_series/32.435#measCollec">
+<fileHeader dnPrefix="" fileFormatVersion="32.435 V11.0" vendorName="Ericsson">
+<fileSender localDn="PCC00S2023" elementType="PCC" />
+<measCollec beginTime="2024-03-29T00:45:00+00:00"/>
+</fileHeader>
+<measData>
+<managedElement userLabel="" localDn="PCC00S2023" swVersion="1.17" />
+<measInfo measInfoId="smf-session-management-n1-snssai-apn">
+<job jobId="pc-sm-all-job" />
+<granPeriod duration="PT900S" endTime="2024-03-29T01:00:00+00:00" />
+<repPeriod duration="PT900S"/>
+<measType p="1">establishment-acc</measType>
+<measType p="3">establishment-req</measType>
+<measType p="7">smf-modification-cmd</measType>
+<measType p="18">smf-modification-cmpl</measType>
+<measValue measObjLdn="/epg:epg/pgw/ns[name=3-000009]/apn[name=dnnB.ericsson.se]">
+<r p="1">2400</r>
+<r p="3">2640</r>
+<r p="7">480</r>
+<r p="18">240</r>
+</measValue>
+<measValue measObjLdn="/epg:epg/pgw/ns[name=3-000009]/apn[name=dnnC.ericsson.se]">
+<r p="1">2880</r>
+<r p="3">3168</r>
+<r p="7">576</r>
+<r p="18">288</r>
+</measValue>
+<measValue measObjLdn="/epg:epg/pgw/ns[name=5-000053]/apn[name=dnnB.ericsson.se]">
+<r p="1">3360</r>
+<r p="3">3696</r>
+<r p="7">672</r>
+<r p="18">336</r>
+</measValue> 
+</measInfo>
+<measInfo measInfoId="smf-nsmf-pdu-session-snssai-apn">
+<job jobId="pc-sm-all-job" />
+<granPeriod duration="PT900S" endTime="2024-03-29T01:00:00+00:00" />
+<repPeriod duration="PT900S"/>
+<measType p="3">create-sm-context-req</measType>
+<measType p="4">create-sm-context-resp-succ</measType>
+<measType p="7">release-sm-context-req</measType>
+<measType p="8">release-sm-context-resp-succ</measType>
+<measType p="11">sm-context-status-notify-req</measType>
+<measType p="12">sm-context-status-notify-req-fail-comm</measType>
+<measType p="21">update-sm-context-req</measType>
+<measType p="22">update-sm-context-resp-succ</measType>
+<measValue measObjLdn="/epg:epg/pgw/ns[name=3-000009]/apn[name=dnnB.ericsson.se]">
+<r p="3">2400</r>
+<r p="4">2376</r>
+<r p="7">720</r>
+<r p="8">696</r>
+<r p="11">480</r>
+<r p="12">456</r>
+<r p="21">240</r>
+<r p="22">216</r>
+</measValue>
+<measValue measObjLdn="/epg:epg/pgw/ns[name=3-000009]/apn[name=dnnC.ericsson.se]">
+<r p="3">2640</r>
+<r p="4">2608</r>
+<r p="7">792</r>
+<r p="8">760</r>
+<r p="11">528</r>
+<r p="12">496</r>
+<r p="21">264</r>
+<r p="22">232</r>
+</measValue>
+<measValue measObjLdn="/epg:epg/pgw/ns[name=5-000053]/apn[name=dnnB.ericsson.se]">
+<r p="3">2880</r>
+<r p="4">2848</r>
+<r p="7">864</r>
+<r p="8">832</r>
+<r p="11">576</r>
+<r p="12">544</r>
+<r p="21">288</r>
+<r p="22">256</r>
+</measValue> 
+</measInfo>
+</measData>
+<fileFooter>
+<measCollec endTime="2024-03-29T01:00:00+00:00" />
+</fileFooter>
+</measCollecFile>

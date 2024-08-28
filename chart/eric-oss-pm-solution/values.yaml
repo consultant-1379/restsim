@@ -1,0 +1,190 @@
+# Default values for eric-oss-pm-solution.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+#global:
+#  pullSecret: armdocker-secret
+
+replicaCount: 1 
+
+image:
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "VERSION"         # ex. 1.0.0-0-10adc2e
+  rstate: "RSTATE"       # ex. R1A
+  repoPath: "REPO_PATH"  # proj-eric-oss-pm-solution/proj-eric-oss-pm-solution-ci-internal
+  repoUrl: "REPO_URL"    # armdocker.rnd.ericsson.se
+
+loggingUtilityImage: "armdocker.rnd.ericsson.se/proj_oss_releases/enm/pm_logging_utility:v9"
+
+imageCredentials:
+  registry:
+#  pullSecret: armdocker-secret
+
+imagePullSecrets: []
+fullnameOverride: "eric-oss-pm-solution"
+
+logging:
+  level: "INFO"
+
+persistence: #REMOVE
+  enabled: true #REMOVE
+  existingClaim: "pmic-pvc" #REMOVE
+
+podAnnotations: {} #REMOVE
+
+podSecurityContext: {} #REMOVE
+  # fsGroup: 2000
+
+securityContext:
+  privileged: true
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+ingress:
+  enabled: false
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths: []
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {} #REMOVE
+
+tolerations: [] #REMOVE
+
+affinity: {}
+
+on_demand: true
+
+#CPU
+concurrency: 8 
+
+stats_enabled: true 
+
+celltrace_enabled: true 
+
+future_enabled: false 
+
+replay_enabled: false
+
+ebsn_replay_counter_mapping: false
+
+ebsn_performance_enabled: false
+
+playback_enabled: false
+
+#If custom_ctr is true, will generate celltrace files as per the ctr_files site value. 
+#If false, it will generate celltrace for entire started NR network
+custom_ctr: true
+
+pcc_pcg_for_esoa:
+  # Functional use case : enabled must set to true and performance_mode must set to false.
+  # Performance use case : enabled must set to true and performance_mode must set to true.
+  enabled: false
+  performance_mode: false
+
+custom_stats: true 
+enm_id_list:
+  - "enm_1"
+
+nr:
+  sims_per_enm: 8
+  mim_release:
+    - "21-Q4-V1"
+  nes_per_sim: 1250
+  total_started: 5000
+  stats_files: 5000
+  ctr_files: 120
+
+pcc:
+  sims_per_enm: 4
+  mim_release:
+    - "21-Q4-V1"
+  nes_per_sim: 50
+  total_started: 50
+  stats_files: 50
+
+pcc_amf:
+  sims_per_enm: 0
+  mim_release:
+    - "21-Q4-V1"
+  nes_per_sim: 0
+  total_started: 0
+  stats_files: 0
+
+pcg:
+  sims_per_enm: 4 
+  mim_release:
+    - "21-Q4-V1"
+  nes_per_sim: 50
+  total_started: 50
+  stats_files: 50
+
+lte_dg2:
+  sims_per_enm: 8
+  mim_release:
+    - "21-Q4-V1"
+  nes_per_sim: 1250
+  total_started: 5000
+  stats_files: 5000
+  ctr_files: 1
+ 
+ebsn:
+  sims_per_enm: 25
+  mim_release:
+    - "21-Q4-V1"
+  nes_per_sim: 1000
+  total_started: 25000
+
+cnf_vdu:
+  sims_per_enm: 4
+  mim_release:
+    - "21-Q4-V1"
+  nes_per_sim: 270
+  total_started: 1080
+  stats_files: 1080
+
+cnf_vcucp:
+  sims_per_enm: 4
+  mim_release:
+    - "21-Q4-V1"
+  nes_per_sim: 270
+  total_started: 1080
+  stats_files: 1080
+
+cnf_vcuup:
+  sims_per_enm: 4
+  mim_release:
+    - "21-Q4-V1"
+  nes_per_sim: 270 
+  total_started: 1080
+  stats_files: 1080

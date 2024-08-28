@@ -1,0 +1,233 @@
+#!/bin/bash
+
+ROOT_DIR=`dirname $0`
+. ${ROOT_DIR}/functions
+
+getRncMimVer()
+{
+    MY_RNC=$1
+
+    cat ${TMP_DIR}/mim_ver.txt | nawk -v rnc=${MY_RNC} '{if ($1 == rnc ) {print $2} }' | sed 's/\./_/g'
+}
+
+makeWNCSasc()
+{
+    MY_OUT_DIR=$1
+    MY_COUNT_427=$2
+    MY_COUNT_428=$3
+    MY_RNC_FFV=$4
+
+    cd ${MY_OUT_DIR}
+
+    log " Running genGpehFiles to general ASC files with FFV ${MY_RNC_FFV}"
+    #genGpehFiles [-H header] [-4 event 444] [-5 event 459] [-7 event 427] [-8 event 428] [-F footer] [-T Trace] [-E <eventType>:<NrOfEvents>,<eventType>:<NrOfEvents>...]
+    CMD="/opt/ericsson/brf/unsupported/tools.sh ${GEN_DIR}/genGpehFiles -v ${MY_RNC_FFV} -E 427:${MY_COUNT_427},428:${MY_COUNT_428},459:0"
+    ${CMD}
+    if [ $? -ne 0 ] ; then
+        echo "ERROR: Non-zero exit from ${CMD}"
+        exit 1
+    fi
+}
+
+printUsage()
+{
+    cat <<EOF
+Usage: makeWNCS -g genGpehFilesDir -f oss.cfg -m missing -u unmonitored -p ropPeroid [ -t tmpdir ]
+
+where
+ossCfg
+The cfg file to use. This contains various setting for the deployment
+
+genGpehFilesDir
+The directory containing the genGpehFiles, a2gpeh & gpeh2a (From RNO Design)
+
+ropPeroid
+15 or 1 
+
+missing/unmonitored
+Events to generate per cell
+EOF
+}
+
+KEEP_TMP=0
+SKIP_IF_EXISTS=0
+TMP_ROOT=/tmp
+
+#INTERNAL_SOHO_DS_MISSING_NEIGHBOUR 427
+#INTERNAL_SOHO_DS_UNMONITORED_NEIGHBOUR 428
+while getopts  "t:p:g:m:u:sf:k" flag
+do
+    case "$flag" in
+        f) OSS_MASTER_CFG="$OPTARG";;
+        g) GEN_DIR="$OPTARG";;
+        m) MISSING_PER_CELL="$OPTARG";;
+        u) UNMONITORED_PER_CELL="$OPTARG";;
+        t) TMP_ROOT="$OPTARG";;
+        p) ROP_PERIOD="$OPTARG";;
+
+        s) SKIP_IF_EXISTS=1;;
+        k) KEEP_TMP=1;;
+
+        *) printUsage
+            exit 1;;
+    esac
+done
+
+
+if [ -r ${OSS_MASTER_CFG} ] ; then
+    . ${OSS_MASTER_CFG} > /dev/null 2>&1
+else
+    echo "ERROR: Cannot find OSS cfg file ${OSS_MASTER_CFG}"
+    printUsage
+    exit 1
+fi
+
+
+if [ -z "${GPEH_CELLS_PER_MP_CONFIG_LIST}" ] ; then
+    echo "ERROR: GPEH_CELLS_PER_MP_CONFIG_LIST not defined"
+    exit 1
+fi
+
+if [ -z "${MISSING_PER_CELL}" ] || [ -z "${UNMONITORED_PER_CELL}" ] ; then
+    echo "ERROR: You must specify the MISSING_PER_CELL and UNMONITORED_PER_CELL"
+    printUsage
+    exit 1
+fi
+
+if [ -z "${GEN_DIR}" ] ; then
+    echo "ERROR: You must specify the directory containing the genGpehFiles tools"
+    printUsage
+    exit 1
+fi
+
+if [ ! -x "${GEN_DIR}/genGpehFiles" ] ; then
+    echo "ERROR: Cannot find executable genGpehFiles in ${GEN_DIR}"
+    printUsage
+    exit 1
+fi
+
+checkPMDIR
+if [ $? -ne 0 ] ; then
+    log "ERROR: PMDIR not set correctly"
+    exit 1
+else
+    OUT_DIR=${PMDIR}/gpeh_templates/${ROP_PERIOD}
+fi
+
+if [ ! -d "${TMP_ROOT}" ] ; then
+    echo "ERROR: tmp directory \"${TMP_ROOT}\" does not exist"
+    printUsage
+    exit 1
+fi
+
+TMP_DIR=${TMP_ROOT}/makencs
+if [ ! -d ${TMP_DIR} ] ; then
+    mkdir ${TMP_DIR}
+fi
+
+if [ ! -r ${TMP_DIR}/mim_ver.txt ] ; then
+    log "Get MIM Versions"
+    /opt/ericsson/nms_cif_cs/etc/unsupported/bin/cstest -s Seg_masterservice_CS lt MeContext -f '$.neMIMName==RNC_NODE_MODEL' -an neMIMversion | \
+        awk '{if ( $1 ~ /^Sub/ ) { rnc=$1 } else if ( $2 ~ /^neMIMversion/ ) { print rnc, $6; } }' | \
+        sed 's/^[^ ]*MeContext=//' | sed 's/"v//' | sed 's/"//g' > ${TMP_DIR}/mim_ver.txt
+fi
+
+if [ ! -d "${OUT_DIR}" ] ; then
+    log "Creating ${OUT_DIR}"
+    mkdir ${OUT_DIR}
+fi
+
+RNC_LIST=`cat ${TMP_DIR}/mim_ver.txt | awk '{print $1}' | sort -n`
+
+for RNC in ${RNC_LIST} ; do
+    if [ ${SKIP_IF_EXISTS} -eq 1 ] && [ -r ${OUT_DIR}/${RNC}.wncs_templates.tar.gz ] ; then
+        log "INFO: File already exists for ${RNC}"
+        continue
+    fi
+
+    # From balazs.dosa@ericsson.com:
+    # You have to specify the GPEH file version for genGpehFiles in the command line. We recommend
+    # 1) generate 7.1 version ascii files for all RNCs with the /opt/ericsson/brf/unsupported/tools.sh ./genGpehFiles -v 7.1 command
+    # 2) copy the files corresponding to 7.1 RNCs to another directory and remove the rest of the files
+    # 3) generate 7.2 version ascii files for all RNCs with the /opt/ericsson/brf/unsupported/tools.sh ./genGpehFiles command
+    # 4) copy the files corresponding to 7.2 RNCs to the previous directory and remove the rest of the files
+    # 5) generate binary files from the saved ascii files with the ./a2gpeh command
+    RNC_MIM_VER=`getRncMimVer $RNC`
+    RNC_FFV=$(eval "echo \$$(echo ${RNC_MIM_VER}_RNC_FMT_VER)")
+    if [ -z "${RNC_FFV}" ] ; then
+        log "ERROR: Could not get FFV for ${RNC} ${RNC_MIM_VER}"
+        exit 1
+    fi
+    RNC_FFV_NUM=`echo ${RNC_FFV} | sed 's/ //g' | sed 's/-/\./'`
+    ASC_FILE=${TMP_DIR}/${RNC_FFV_NUM}/${RNC}.asc
+    if [ ! -r  ${ASC_FILE} ] ; then
+        mkdir ${TMP_DIR}/${RNC_FFV_NUM}
+        makeWNCSasc ${TMP_DIR}/${RNC_FFV_NUM} ${MISSING_PER_CELL} ${UNMONITORED_PER_CELL} ${RNC_FFV_NUM}
+    fi
+
+    log "Starting RNC ${RNC} ${RNC_FFV_NUM}"
+    RNC_MP_DIR=${TMP_DIR}/${RNC}_MP
+    mkdir ${RNC_MP_DIR}
+
+    log " Extract cell Ids"
+    grep cId1 ${ASC_FILE} | grep -v rncId1 | awk '{print $2}' | sort -un > ${RNC_MP_DIR}/cid.txt
+
+    # From balazs.dosa@ericsson.com: 
+    # One possible root cause is that the GPEH events are totally random in the GPEH files. 
+    # It means that it is possible that a certain cell sends 1000 different "WNCS events" with 
+    # 1000 different scrambling codes, which is impossible in a real network. In a real network 
+    # a cell would only send WNCS events with the scrambling codes of the neighbouring cells, 
+    # ie at most 15 cells. We recommend restricting the scrambling codes to the [1-15] range. 
+    # This would generate a much more real networ-like load on WNCS (and other applications as well). 
+    #
+    # From Tamás Mentes
+    # You don't need to use sed commands.
+    # cat ${TMP_DIR}/${RNC}.asc | \
+    #   sed -e 's/\(scrambling[_]*[cC]ode[_a-zA-Z]*[1-6]* \)[a-z0-9]*/\1 random17/' \
+    #   -e 's/^random17 .*/random17 0 17/' > \
+    #   ${TMP_DIR}/${RNC}.asc.fixscram
+
+    NUM_CELLS=`wc -l ${RNC_MP_DIR}/cid.txt | awk '{print $1}'` 
+
+    NE_NUM_SUB_FILES=`getNumSubFiles ${RNC} ${NUM_CELLS}`
+    if [ $? -ne 0 ] ; then
+        log "ERROR: Failed to get number of MPs for ${RNC}"
+        exit 1
+    fi
+
+    ACTUAL_GPEH_CELLS_PER_MP=`expr ${NUM_CELLS} / ${NE_NUM_SUB_FILES}`
+
+    log " ${NUM_CELLS} cells so we need ${NE_NUM_SUB_FILES} files with Cell/File Ratio of ${ACTUAL_GPEH_CELLS_PER_MP}"
+
+    log " Split ASC for ${RNC}"
+    ${ROOT_DIR}/splitWNCSascii --in ${ASC_FILE} --outdir ${RNC_MP_DIR} \
+        --cellmp ${ACTUAL_GPEH_CELLS_PER_MP}
+
+    MP_INDEX=1
+    while [ ${MP_INDEX} -le ${NE_NUM_SUB_FILES} ] ; do
+        log " Encoding ASC for MP ${MP_INDEX} for ${RNC}"       
+        ${GEN_DIR}/a2gpeh < ${RNC_MP_DIR}/${MP_INDEX}.asc > ${RNC_MP_DIR}/${RNC}_mp${MP_INDEX}_gpeh_sub.bin &
+
+        MP_INDEX=`expr ${MP_INDEX} + 1`
+    done
+    wait
+
+    log " Tarring Generated files"
+    `cd ${RNC_MP_DIR} ; tar cf - ${RNC}*.bin | gzip > ${OUT_DIR}/${RNC}.wncs_templates.tar.gz`
+    if [ $? -ne 0 ] ; then 
+        echo "ERROR: Failed to create ${OUT_DIR}/${RNC}.wncs_templates.tar.gz"
+        exit 1
+    fi
+
+    if [ ${KEEP_TMP} -eq 0 ] ; then
+        rm -rf ${RNC_MP_DIR} 
+    fi
+done
+
+cd /
+
+if [ ${KEEP_TMP} -eq 0 ] ; then
+    rm -rf ${TMP_DIR}
+fi
+
+log "Done"

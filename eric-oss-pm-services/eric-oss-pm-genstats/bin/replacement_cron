@@ -1,0 +1,30 @@
+#!/bin/bash
+
+interval=$1
+dur=$2
+
+interval_in_seconds=$((${interval}*60))
+
+if [[ -z $dur ]];then
+    dur=24
+fi
+
+rops_per_hour=$((60/$interval))
+total_rops=$((${rops_per_hour}*${dur}))
+echo $total_rops
+echo "cron started"
+rop=0
+
+while true
+do
+    echo "Running genstats..."
+    rop=$(($rop+1))
+    /netsim_users/pms/bin/genStats -r ${interval}
+    if [[ $(($rop % 4)) -eq 0 ]]; then
+        echo "Running rmPmFiles"
+        /netsim_users/pms/bin/rmPmFiles
+    fi
+    echo "Execution of genStats script completed, sleeping for ${interval} minutes. $((${total_rops}-${rop})) remain."
+    sleep 900 
+done
+

@@ -1,0 +1,19 @@
+#!/usr/bin/expect
+###############################################################################
+# COPYRIGHT Ericsson 2016
+#
+# The copyright to the computer program(s) herein is the property of
+# Ericsson Inc. The programs may be used and/or copied only with written
+# permission from Ericsson Inc. or in accordance with the terms and
+# conditions stipulated in the agreement/contract under which the
+# program(s) have been supplied.
+###############################################################################
+# umounts simulation file system from the /netsim/netsim_dbdir/simdir/netsim/
+# which requires root user prilviges
+
+set SIMULATION [lindex $argv 0];
+
+spawn su root -c "umount /netsim/netsim_dbdir/simdir/netsim/netsimdir/$SIMULATION/*/fs/c/pm_data"
+expect "Password:"
+send "shroot\r"
+expect eof

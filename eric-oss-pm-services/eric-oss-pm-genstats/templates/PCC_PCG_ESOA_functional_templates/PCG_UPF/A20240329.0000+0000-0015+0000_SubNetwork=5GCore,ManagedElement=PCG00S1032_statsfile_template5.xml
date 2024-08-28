@@ -1,0 +1,60 @@
+<?xml version='1.0' encoding='utf-8'?>
+<?xml-stylesheet type="text/xsl" href="MeasDataCollection.xsl"?>
+<measCollecFile xmlns="http://www.3gpp.org/ftp/specs/archive/32_series/32.435#measCollec">
+<fileHeader dnPrefix="" fileFormatVersion="32.435 V11.0" vendorName="Ericsson">
+<fileSender localDn="PCG00S1032" elementType="PCG" />
+<measCollec beginTime="2024-03-29T00:00:00+00:00" />
+</fileHeader>
+<measData>
+<managedElement userLabel="PCG00S1032" localDn="PCG00S1032" swVersion="1.17" />
+<measInfo measInfoId="up-payload-dnn-slice">
+<job jobId="slice-assurance-upf"/>
+<granPeriod duration="PT900S" endTime="2024-03-29T00:15:00+00:00" />
+<repPeriod duration="PT900S" />
+<measType p="1">ul-ipv4-received-bytes</measType>
+<measType p="2">dl-ipv4-received-bytes</measType>
+<measType p="3">ul-ipv6-received-bytes</measType>
+<measType p="4">dl-ipv6-received-bytes</measType>
+<measType p="5">ul-ipv4-drop-packets</measType>
+<measType p="6">dl-ipv4-drop-packets</measType>
+<measType p="7">ul-ipv6-drop-packets</measType>
+<measType p="8">dl-ipv6-drop-packets</measType>
+<measType p="9">ul-unstr-drop-packets</measType>
+<measType p="10">dl-unstr-drop-packets</measType>
+<measType p="11">ul-unstr-received-bytes</measType>
+<measType p="12">dl-unstr-received-bytes</measType> 
+<measValue measObjLdn="/pcupe:user-plane/pcupdnn:dnns/pcupdnn:dnn[name=dnnA.ericsson.se]/pcupdnn:slices/pcupdnn:slice[name=1-000005]">
+<r p="1">5000</r>
+<r p="2">10000</r>
+<r p="3">15000</r>
+<r p="4">30000</r>
+<r p="5">250</r>
+<r p="6">100</r>
+<r p="7">150</r>
+<r p="8">300</r>
+<r p="9">50</r>
+<r p="10">100</r>
+<r p="11">150</r>
+<r p="12">300</r>
+</measValue>
+</measInfo>
+<measInfo measInfoId="up-pfcp-procedure-dnn-slice">
+<job jobId="slice-assurance-upf"/>
+<granPeriod duration="PT900S" endTime="2024-03-29T00:15:00+00:00" />
+<repPeriod duration="PT900S"/>
+<measType p="1">session-establishment-req-rcvd</measType>
+<measType p="2">session-establishment-rsp-rej-sent</measType>
+<measType p="3">session-modification-req-rcvd</measType> 
+<measType p="4">session-modification-rsp-rej-sent</measType>
+<measValue measObjLdn="/pcupe:up/dnn[name=dnnA.ericsson.se]/slice[name=1-000005]">
+<r p="1">100</r>
+<r p="2">10</r>
+<r p="3">200</r>
+<r p="4">20</r>
+</measValue>
+</measInfo>
+</measData>
+<fileFooter>
+<measCollec endTime="2024-03-29T00:15:00+00:00" />
+</fileFooter>
+</measCollecFile>

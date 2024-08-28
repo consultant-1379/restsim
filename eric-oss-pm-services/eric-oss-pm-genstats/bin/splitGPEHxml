@@ -1,0 +1,166 @@
+#!/usr/bin/env perl
+
+# $Id: splitGPEHxml 8 2008-06-06 14:32:41Z eeicmuy $
+
+use strict;
+use Getopt::Long;
+use Data::Dumper;
+
+our $DEBUG = 0;
+
+main();
+
+sub main
+{
+    my ($inFile,$removeEvents,$outFile);
+    my %eventCounts = ();
+    my $result = GetOptions(
+	"in=s"   => \$inFile,
+	"out=s" => \$outFile,
+	"remove" => \$removeEvents,
+	"eventcount=s" => \%eventCounts,
+	"debug=s" => \$DEBUG
+    );			    
+    ($result == 1) or die "Invalid args";
+
+    open IN, $inFile or die "Cannot open $inFile";
+
+    my $FIND_EVENT_START = 0;
+    my $FIND_EVENT_END = 1;
+    my $state = $FIND_EVENT_START;
+
+    my %eventMap = ();
+    my @eventList = ();
+    my $r_event;
+    while ( my $line = <IN> )
+    {
+	if ( $DEBUG > 9 ) { print "main: state=$state line=$line"; }
+
+	if ( $state == $FIND_EVENT_START )
+	{
+	    #<event event-id="451"  ue-context="65535"> <!-- internal-system-utilization -->
+
+	    if ( $line =~ /^\s+<event .*-- (\S+) --/ )
+	    {
+		my $eventId = $1;
+		if ( $DEBUG > 8 ) { print "main: found event start for $eventId\n"; }
+
+		if ( $removeEvents == 0 )
+		{
+		    if ( exists $eventCounts{$eventId} )
+		    {
+			if ( $eventCounts{$eventId} > 0 )
+			{
+			    if ( $DEBUG > 7 ) { print "main: looking for $eventCounts{$eventId} for $eventId\n"; }
+			    
+			    $eventCounts{$eventId} = $eventCounts{$eventId} - 1;
+			    
+			    $r_event = [];
+			    push @{$r_event}, $line;
+			    
+			    if ( ! exists $eventMap{$eventId} )
+			    {
+				$eventMap{$eventId} = [];
+			    }
+			    push @{$eventMap{$eventId}}, $r_event;
+			    
+			    push @eventList, $r_event;
+			    
+			    $state = $FIND_EVENT_END;
+			}
+		    }
+		}
+		else # removeEvents
+		{
+		    if ( ! exists $eventCounts{$eventId} )
+		    {
+			$r_event = [];
+			push @{$r_event}, $line;
+			
+			push @eventList, $r_event;		    
+			$state = $FIND_EVENT_END;
+		    }
+		}
+	    }
+	}
+	elsif ( $state == $FIND_EVENT_END )
+	{
+	    push @{$r_event}, $line;
+	    
+	    if ( $line =~ /^  <\/event>/ )
+	    {
+		if ( $DEBUG > 7 ) { print "main: found event end\n"; }
+		if ( $DEBUG > 8 ) { print Dumper("main: event content", $r_event); }
+
+		close OUT;
+		$state = $FIND_EVENT_START;
+	    }
+	}
+    }
+    close IN;
+
+    my @copiedEvents = ();
+    if ( $removeEvents == 0 )
+    {
+	my $addEvent = 0;
+	foreach my $eventId ( keys %eventCounts )
+	{
+	    if ( $eventCounts{$eventId} > 0 ) 
+	    {
+		$addEvent = 1;
+		print "WARN: Missing $eventCounts{$eventId} events for event type $eventId, will try and duplicate existing events\n";
+	    }
+	    else
+	    {
+		delete $eventCounts{$eventId};
+	    }
+	}
+	
+	if ( $addEvent )
+	{
+	    while ( $addEvent )
+	    {
+		$addEvent = 0;
+		
+		foreach my $r_event ( @eventList )
+		{
+		    my ($eventId) = $r_event->[0] =~ /^\s+<event .*-- (\S+) --/;
+		    if ( $eventCounts{$eventId} > 0 ) 
+		    {
+			if ( $DEBUG > 6 ) { print "Copying event $eventId\n"; }
+			$eventCounts{$eventId} = $eventCounts{$eventId} - 1;
+			push @copiedEvents, $r_event;
+			$addEvent = 1;
+		    }
+		}
+	    }
+	    
+	    foreach my $eventId ( keys %eventCounts )
+	    {
+		if ( $eventCounts{$eventId} > 0 ) 
+		{
+		    print "ERRROR: Still Missing $eventCounts{$eventId} events for event type $eventId\n";
+		    exit 1;
+		}
+	    }	
+	}
+    }
+
+    open OUT, ">$outFile" or die "Cannot open $outFile";
+    foreach my $r_event ( @eventList )
+    {
+	foreach my $line ( @{$r_event} ) 
+	{
+	    print OUT $line;
+	}
+    }
+    foreach my $r_event ( @copiedEvents )
+    {
+	foreach my $line ( @{$r_event} ) 
+	{
+	    print OUT $line;
+	}
+    }
+    close OUT;
+    
+}

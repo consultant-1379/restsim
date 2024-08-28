@@ -1,0 +1,244 @@
+#!/usr/bin/env perl
+
+use strict;
+use Getopt::Long;
+use Data::Dumper;
+
+our $DEBUG = 0;
+
+main();
+
+
+sub readCustom {
+    my ($file) = @_;
+
+    my %customCntrs = ();
+
+    open CUSTOM, $file or die "Cannot open $file";
+    while ( my $line = <CUSTOM> ) { 
+	if ( $DEBUG > 9 ) { print "readCustom: line=$line"; }
+	if ( $line =~/^ManagedElement=1/ && $line =~/^(\S+)\s+(\S+)\s+(\d+)$/ ) {
+	    my ($rdn,$cntr,$value) = ($1,$2,$3);
+	    if ( $DEBUG > 3 ) { print "readCustom: rdn,cntr,value $rdn,$cntr,$value\n"; }
+	    if ( ! exists $customCntrs{$cntr} ) {
+		$customCntrs{$cntr} = {};
+	    }
+	    $customCntrs{$cntr}->{$rdn} = $value;
+	}
+    }
+    close CUSTOM;
+    
+    if ( $DEBUG > 1 ) { print Dumper("readCustom customCntrs", \%customCntrs); }
+
+    return \%customCntrs;
+}
+
+sub main
+{
+    my $cellNameFormat = "%s-%02d-%02d";
+    my ($rnc,$numRbs,$numCellPerRbs,$cellListFile,$inFile,$outFile,$customFile,$meFDN_oss,$meFDN);
+    my $oss_enabled = "False";
+    my $result = GetOptions(
+                "rnc=s" =>\$rnc,
+                "inFile=s" =>\$inFile,
+                "outFile=s" =>\$outFile,
+                "cellformat=s" => \$cellNameFormat,
+                "numCellPerRbs=n" =>\$numCellPerRbs,
+                "celllist=s" => \$cellListFile,
+                "custom=s" => \$customFile,
+                "debug=n" => \$DEBUG,
+                "oss=s" => \$oss_enabled,
+                "fdn=s" => \$meFDN_oss
+                );
+    ( $result == 1 ) or die("Invalid Args");
+      if (  $oss_enabled eq "True" ) {
+       $meFDN = "$meFDN_oss"; } 
+     else
+     {
+
+     $meFDN = "SubNetwork=ONRM_RootMo_R,SubNetwork=$rnc,MeContext=$rnc";}
+    my $r_CellList;
+    if ( $cellListFile )
+    {
+    $r_CellList = [];
+    open CELL_LIST, $cellListFile or die "Cannot open $cellListFile";
+    my $firstCell = 1;
+    while ( my $line = <CELL_LIST> )
+    {
+        if ( $line =~ /MeContext=$rnc/ ) {
+        my ($cellName) = $line =~ /UtranCell=(.*)/;
+        push @{$r_CellList}, $cellName;
+
+        if ( $firstCell == 1 ) {
+            $firstCell = 0;
+            ($meFDN) = $line =~ /^(.*),ManagedElement=1/;
+            if ( $DEBUG > 0 ) { print "main: meFDN=$meFDN\n"; }
+        }
+        }
+    }
+    close CELL_LIST;
+    }
+
+    my $r_Custom;
+    if ( $customFile ) {
+	$r_Custom = readCustom($customFile);
+    }
+
+    if ( $inFile eq "-" )
+    {
+	open INPUT, "<&STDIN";
+    }
+    else
+    {
+	open INPUT, $inFile or die "Could not open inFile $inFile";
+    }
+
+    if ( $outFile eq "-" )
+    {
+	open OUTPUT, ">&STDOUT";
+    }
+    else
+    {
+	open OUTPUT, ">$outFile" or die "Could not open outFile $outFile";
+    }
+#
+# XML file consists of md blocks
+#  each mt is a counter name, the "position of the mt gives the postion of the correspond counter (<r>) in
+#  each mv block
+#
+# <md>
+# <!-- Padding to make up for empty neun/nedn fields    -->
+# <neid>
+# <neun></neun>
+# <nedn></nedn>
+# </neid>
+# <mi>
+# <mts>20120807081500Z</mts>
+# <gp>900</gp>
+# <mt>pmBwErrBlocks</mt>
+# <mt>pmBwLostCells</mt>
+#...
+# <mt>pmLostFpmCells</mt>
+# <mv>
+# <moid>ManagedElement=1,TransportNetwork=1,Aal0TpVccTp=1</moid>
+# <r>136292</r>
+#..
+# <r>133447</r>
+# </mv>
+# </mi>
+# </md>
+# <md>
+
+    my $r_currMoCustom;
+    my $r_miCustom;
+    my $mtIndex = 0;
+    my $rIndex = 0;
+    my $inMV = 0;
+    my $mvCount = 1;
+    my $lineNum = 0;
+
+    while ( my $line = <INPUT> )
+    {
+	$lineNum++;
+
+	if ( $DEBUG > 9 ) { print "main: inMV=$inMV lineNum=$lineNum line=$line"; }
+	
+	if ( $inMV == 0 ) {
+	    if ( $line =~ /^\<sn\>/ ) {
+		$line = "<sn>$meFDN</sn>\n";
+	    } elsif ( $line =~ /^<mi>/ ) {
+		$r_miCustom = undef;
+		$mtIndex = 0;
+		$mvCount = 0;
+	    } elsif ( $line =~ /^<mt>(\S+)<\/mt>$/ ) {
+		my $cntrName = $1;
+		$mtIndex++;
+		if ( $DEBUG > 4 ) { print "main: checking $cntrName mtIndex=$mtIndex\n"; } 
+
+		if ( exists $r_Custom->{$cntrName} ) {
+		    if ( ! $r_miCustom ) {
+			$r_miCustom = {};
+		    }
+		    my $r_rdnVal = delete $r_Custom->{$cntrName};
+		    foreach my $rdn ( keys %{$r_rdnVal} ) {
+			$r_miCustom->{$rdn}->{$mtIndex} = {
+			    'name'  => $cntrName,
+			    'value' => $r_rdnVal->{$rdn}
+			};			    
+		    }
+		}		    			
+	    } elsif ( $line =~ /^<mv>/ ) {
+		$inMV = 1;
+		$mvCount++;
+		if ( $mvCount == 1 ) {		   
+		    if ( $DEBUG > 4 ) { print Dumper("main: entering mv r_miCustom", $r_miCustom); }
+		}
+	    }
+	} else {
+	    if ( $line =~ /<moid>(\S+)<\/moid>$/ ) {
+		my $moid = $1;
+		if ( $DEBUG > 7 ) { print "main: moid=$moid\n"; }
+		
+		if ( $moid =~ /UtranCell=(\d+)/ ) {
+		    my $cellIndex = $1;
+		    my $cellName = getCellName($cellNameFormat,$rnc,$cellIndex,$numCellPerRbs,$r_CellList);
+		    $moid =~ s/UtranCell=$cellIndex/UtranCell=$cellName/;
+		} else {
+		    while ( $moid =~ /UCELL(\d+)/ ) {
+			my $cellIndex = $1;
+			my $cellName = getCellName($cellNameFormat,$rnc,$cellIndex,$numCellPerRbs);
+			$moid =~ s/UCELL$cellIndex/$cellName/g;
+		    }
+		}		
+		$line = "<moid>" . $moid . "</moid>\n";
+
+		$rIndex = 0;
+		if ( $r_miCustom && exists $r_miCustom->{$moid} ) {
+		    $r_currMoCustom = delete $r_miCustom->{$moid};
+		} else {
+		    $r_currMoCustom = undef;
+		}
+		if ( $DEBUG > 7 ) { print Dumper("main: r_currMoCustom", $r_currMoCustom); } 
+	    } elsif ( $r_currMoCustom && $line =~ /<r>[\d,]+<\/r>\n/ ) {
+		$rIndex++;
+		if ( $DEBUG > 8 ) { print "main: rIndex=$rIndex\n"; } 
+		if ( exists $r_currMoCustom->{$rIndex} ) {   
+		    my $customName  = $r_currMoCustom->{$rIndex}->{'name'};
+		    my $customValue = $r_currMoCustom->{$rIndex}->{'value'};
+		    if ( $DEBUG > 7 ) { print "main: lineNum=$lineNum rIndex=$rIndex cntrName=$customName updated to $customValue\n"; } 
+		    $line = "<r>" . $customValue . "</r>\n";
+		}
+	    } elsif ( $line =~ /^<\/mv>/ ) {
+		$inMV = 0;
+	    }
+	}
+	
+	print OUTPUT $line;
+    }
+
+    close INPUT;
+    close OUTPUT;
+}
+
+sub getCellName
+{
+    my ($cellNameFormat, $rnc,$cellIndex,$numCellPerRbs,$r_CellList) = @_;
+
+    my $cellName;
+    if ( $r_CellList )
+    {
+	$cellName = $r_CellList->[$cellIndex-1];
+    }
+    else
+    {
+	if ( $DEBUG > 2 ) { print "getCellName: cellIndex=$cellIndex numCellPerRbs=$numCellPerRbs\n"; }
+
+	my $rbsIndex = int (($cellIndex-1) / $numCellPerRbs) + 1;
+	my $cellId   = (($cellIndex-1) % $numCellPerRbs) + 1;
+	$cellName = sprintf($cellNameFormat, $rnc, $rbsIndex, $cellId);
+    }
+
+    if ( $DEBUG > 2 ) { print "getCellName: cellName=$cellName\n"; }
+
+    return $cellName;
+}

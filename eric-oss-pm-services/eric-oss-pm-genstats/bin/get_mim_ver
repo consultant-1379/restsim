@@ -1,0 +1,163 @@
+#!/usr/bin/env perl
+
+################################################################################
+# COPYRIGHT Ericsson 2018
+#
+# The copyright to the computer program(s) herein is the property of
+# Ericsson Inc. The programs may be used and/or copied only with written
+# permission from Ericsson Inc. or in accordance with the terms and
+# conditions stipulated in the agreement/contract under which the
+# program(s) have been supplied.
+################################################################################
+
+###################################################
+# Version no    :  NSS 21.18
+# Purpose       :  Script is responsible to fetch mim version of a simulation
+# Jira No       :  NSS-37568
+# Gerrit Link   :  https://gerrit.ericsson.se/#/c/10417947/
+# Description   :  DO : PM Support for SBG Nodes 
+# Date          :  21/10/2021
+# Last Modified :  tom.mcgreal@tcs.com
+####################################################
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+
+our $DEBUG = 0;
+
+our $IS_GRAN_SIM = "NO";
+
+
+main();
+
+
+sub main {
+
+    my ($sim,$netype);
+    my $result = GetOptions("netype=s" => \$netype,
+                            "sim=s" => \$sim,
+                            "isgransim=s" => \$IS_GRAN_SIM,
+                            "debug=s" => \$DEBUG
+    );
+    ($result == 1) or die "Invalid args";
+    if ( (! defined $sim) || (! defined $netype) ) {
+        print "Usage: get_mim_ver --sim <SIM> --netype <NETYPE>\n";
+        exit 1;
+    }
+
+    if ( ! -r "/tmp/showstartednodes.txt" ) {
+        system("echo '.show started' | /netsim/inst/netsim_pipe > /tmp/showstartednodes.txt");
+    }
+
+    if ( ! -r "/tmp/nodetypes.txt" ) {
+       system("echo '.show netypes' | /netsim/inst/netsim_pipe > /tmp/nodetypes.txt");
+    }
+
+    # Handling dependency of lower and upper case netypes.
+    $netype = uc $netype;
+
+    my $managledMIM = getMangled($sim,$netype,"/tmp/showstartednodes.txt");
+    if ( ! defined $managledMIM ) {
+        print "ERROR: No match\n";
+        exit 1;
+    }
+
+    my $fullMIM;
+    # ECIM Nodes does not have MIM versions but have NE version therefore fetch
+    # NE version from managledMIM for ECIM nodes
+    my @nesTypeArr = ( "PRBS", "DSC", "ESAPC", "TCU03", "TCU04", "SGSN", "MSRBS-V2", "SPITFIRE", "M-MGW", "CSCF", "MTAS", "SBG", "VSBG", "WCG", "EPG-SSR", "EPG-EVR", "HSS-FE", "RNNODE", "VPP", "VRC", "MRSV", "IPWORKS", "MRFV", "UPG", "WMG", "EME", "VTFRADIONODE", "5GRADIONODE", "R6274", "R6672", "R6673", "R6675", "R6371", "R6471-1", "R6471-2", "R6273", "VRM", "VRSM", "VSAPC", "VTIF", "VNSDS", "CONTROLLER6610");
+    my %paramNeHash = map { $_ => 1 } @nesTypeArr;
+
+    if( exists( $paramNeHash{${netype}} ) || $IS_GRAN_SIM eq "YES" ) {
+        if ( $netype eq "SGSN" || $netype eq "MSRBS-V2" || $netype eq "PRBS" || $netype eq "MRSV" || $netype eq "R6274" || $netype eq "R6672" || $netype eq "R6673" || $netype eq "R6675" || $netype eq "R6371" || $netype eq "R6471-1" || $netype eq "R6471-2" || $netype eq "R6273"  || $netype eq "VNSDS" || $netype eq "CONTROLLER6610" || $netype eq "VSAPC" || $netype eq "DSC" || $netype eq "UPG" || $netype eq "CSCF" || $netype eq "HSS-FE") {
+            $fullMIM = $managledMIM;
+
+        }
+        else {
+            my $sep="-";
+            my $pos = index ($managledMIM, $sep);
+            $fullMIM = substr ($managledMIM,0,$pos);
+        }
+    }
+    else {
+        # For CPP nodes fetch the MIM version
+        $fullMIM = getFullMim($managledMIM,$netype,"/tmp/nodetypes.txt");
+
+        # if fullMIM is undefined then read the netypes again and fetch the fullMIM from it
+        if ( ! defined $fullMIM ) {
+            # Store the netypes in temp file /tmp/netypes.tmp.txt
+            system("echo '.show netypes' | /netsim/inst/netsim_pipe > /tmp/nodetypes.tmp.txt");
+            $fullMIM = getFullMim($managledMIM,$netype,"/tmp/nodetypes.tmp.txt");
+        }
+    }
+    if ( index($sim, "LTE") != -1){
+        if ( "$netype" eq "ERBS") {
+            if ( index($fullMIM, "RUI") != -1){
+                $fullMIM =~ s/-RUI//g;
+            }
+        }
+
+    }
+    print "$fullMIM\n";
+}
+
+sub getMangled($$$) {
+    my ($sim,$netype,$file) = @_;
+
+    my ($thisType,$thisMim);
+    my $result = undef;
+    open INPUT, $file or die "Cannot open $file";
+    while ( (! defined $result) && (my $line = <INPUT>) ) {
+        if ( $DEBUG > 9 ) { print "getMangled: line=$line"; }
+        if ( $line =~ /server_.* for \S+ (\S+) (\S+)/ ) {
+            ($thisType,$thisMim) = (uc $1,$2);
+            $thisMim =~ s/,$//;
+            if ( $DEBUG > 8 ) { print "getMangled: thisType=$thisType thisMim=$thisMim\n"; }
+        } else {
+                    my @neTypeArr = ( "DSC", "ESAPC", "TCU03", "TCU04", "SGSN", "SPITFIRE", "M-MGW", "CSCF", "MTAS", "SBG", "VSBG", "WCG", "EPG-SSR", "EPG-EVR", "HSS-FE", "RNNODE", "VPP", "VRC", "MRSV", "IPWORKS", "MRFV", "UPG", "WMG", "RBS", "EME", "VTFRADIONODE", "5GRADIONODE", "R6274", "R6672", "R6673", "R6675", "R6371", "R6471-1", "R6471-2", "R6273", "VRM", "VRSM", "VSAPC", "VTIF","VNSDS","CONTROLLER6610");
+                        my %paramNe = map { $_ => 1 } @neTypeArr;
+                        if ( (defined $thisType) && ($thisType eq ${netype} ) ) {
+                                if( exists( $paramNe{${netype}} ) || $IS_GRAN_SIM eq "YES" ) {
+                                        if ( $line =~ /$sim/ ) {
+                                                $result = $thisMim;
+                                        }
+                                } else {
+                                        if ( $line =~ /-$sim/ ) {
+                                        $result = $thisMim;
+                                        }
+                                }
+                        }
+        }
+    }
+
+    close INPUT;
+
+    if ( $DEBUG > 0 ) { print "getMangled: result=", $result, "\n"; }
+    return $result;
+}
+
+sub getFullMim($$) {
+   my ($managledMIM,$netype,$file) = @_;
+
+   if ( $DEBUG > 2 ) { print "getFullMim: managledMIM=\"$managledMIM\" netype=$netype\n"; }
+
+   open INPUT, $file or die "Cannot open $file";
+   my $result = undef;
+   my $managled_MIM = uc $managledMIM;
+   while ( (! defined $result) && (my $line = <INPUT>) ) {
+       if ( $DEBUG > 9 ) { print "getFullMim: line=$line"; }
+
+           my $read_line = uc $line;
+       if ( $read_line =~ /^$netype $managled_MIM .* MIM (\S+)/ ) {
+           $result = $1;
+       }
+   }
+
+    close INPUT;
+
+    if ( $DEBUG > 0 ) { print "getFullMim: result=", $result, "\n"; }
+    return $result;
+}
+

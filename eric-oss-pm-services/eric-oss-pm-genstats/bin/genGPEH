@@ -1,0 +1,357 @@
+#!/bin/bash
+
+################################################################################
+# COPYRIGHT Ericsson 2017
+#
+# The copyright to the computer program(s) herein is the property of
+# Ericsson Inc. The programs may be used and/or copied only with written
+# permission from Ericsson Inc. or in accordance with the terms and
+# conditions stipulated in the agreement/contract under which the
+# program(s) have been supplied.
+################################################################################
+
+###################################################
+# Version no    :  NSS 17.12
+# Purpose       :  Script to generate ROPs for GPEH
+# Jira No       :  NSS-13017
+# Gerrit Link   :  https://gerrit.ericsson.se/#/c/2518625/
+# Description   :  Genstats not generating File For GPEH
+# Date          :  07/12/2017
+# Last Modified :  tejas.lutade@tcs.com
+####################################################
+
+ROOT_DIR=`dirname $0`
+. ${ROOT_DIR}/functions
+
+getRncFMT()
+{
+    MY_RNC=$1
+
+    MY_MIM_VER=`${ROOT_DIR}/get_mim_ver --sim ${MY_RNC} --netype RNC`
+    if [ $? -ne 0 ] ; then
+    exit 1
+    fi
+
+    MY_DASH_MIM_VER=$(echo ${MY_MIM_VER} | sed 's/\./_/g')
+
+    # RNC_FMT_VER must be set, so exit 1 if its not set
+    MY_RNC_FMT_VER=$(eval "echo \$$(echo ${MY_DASH_MIM_VER}_RNC_FMT_VER)")
+    if [ -z "${MY_RNC_FMT_VER}" ] ; then
+    exit 1
+    fi
+
+    # Hack here! Can't figure out how to make the above line retain the
+    # space at the start of the FMT_VER, so we'll include an extra
+    # space in the echo below
+    echo " ${MY_RNC_FMT_VER}"
+}
+
+getRncFIV()
+{
+    MY_RNC=$1
+
+    MY_MIM_VER=`${ROOT_DIR}/get_mim_ver --sim ${MY_RNC} --netype RNC`
+    if [ $? -ne 0 ] ; then
+    exit 1
+    fi
+    MY_DASH_MIM_VER=$(echo ${MY_MIM_VER} | sed 's/\./_/g')
+    MY_RNC_FIV_VER=$(eval "echo \$$(echo ${MY_DASH_MIM_VER}_RNC_FIV_VER)")
+
+    echo "${MY_RNC_FIV_VER}"
+}
+
+runConcurrent()
+{
+    LOCK_FILE=$1
+    RNC_NAME=$2
+
+    processRNC ${RNC_NAME}
+
+    rm -f ${LOCK_FILE}
+}
+    
+
+makeRncSubFile()
+{
+    RNC_NAME=$1
+    MP=$2
+    SOURCE_SUB_FILE_DIR=$3
+    NE_PM_DIR=$4
+    SUB_FILENAME=$5
+    STARTDATE=$6
+    RNC_FMT_NUM=$7
+
+    #
+    # Setup directory where the file will go
+    #
+    MP_DIR=`printf "${NE_PM_DIR}/p00%02d00" ${MP}`
+    if [ ! -d ${MP_DIR} ] ; then
+    mkdir -p ${MP_DIR}
+    fi
+
+    if [ ${ENV_TYPE} -eq 0 ] ; then
+        TEMPLATE=${SOURCE_SUB_FILE_DIR}/${RNC_NAME}_mp${MP}_gpeh_sub.bin
+    else
+        LINK_GPEH_TEMPLATE_DIR=/pms_tmpfs/xml_step/gpeh_templates
+        NETSIM_GPEH_TEMPLATE_DIR=/netsim_users/pms/gpeh_templates
+        if [[ ! -d ${LINK_GPEH_TEMPLATE_DIR} ]] ; then
+           if [[ -d ${NETSIM_GPEH_TEMPLATE_DIR} ]];then
+              mkdir -p ${LINK_GPEH_TEMPLATE_DIR} ;
+              log "INFO : Copying GPEH templates from ${NETSIM_GPEH_TEMPLATE_DIR} to ${LINK_GPEH_TEMPLATE_DIR}"
+              cp -rf ${NETSIM_GPEH_TEMPLATE_DIR}/* ${LINK_GPEH_TEMPLATE_DIR}/
+           fi
+        fi
+        TEMPLATE=${SOURCE_SUB_FILE_DIR}/${RNC_NAME}_mp1_gpeh_sub.lnk.gz
+    fi
+    if [ ! -r ${TEMPLATE} ] && [ ! -r ${TEMPLATE}.gz ] ; then
+    echo "ERROR: No template found for ${RNC_NAME} MP ${MP}"
+    return 1
+    fi
+
+    if [ ${ENV_TYPE} -eq 0 ] ; then
+    ${UPDATE_TS} -i ${TEMPLATE}  -t "${STARTDATE}00" -f ${RNC_FMT_NUM} -o - | gzip -f > ${MP_DIR}/${SUB_FILENAME}.gz
+    else
+        if [ ! -f ${MP_DIR}/${SUB_FILENAME}.gz ] ;then
+            ln ${TEMPLATE} ${MP_DIR}/${SUB_FILENAME}.gz
+        fi
+    fi
+    if [ $? -ne 0 ] ; then
+    echo "ERROR: Failed to generated ${OUTPUT}.gz from ${TEMPLATE}"
+    return 1
+    fi
+}
+
+processRNC() {
+    RNC_NAME=$1
+
+    NE_PM_DIR=`printf ${PM_DIR} ${RNC_NAME} ${RNC_NAME}`
+    if [ ! -d ${NE_PM_DIR} ] ; then
+    echo "ERROR: Could not find ${NE_PM_DIR}"
+    return 1
+    fi
+
+    #RNC_FMT_VER=`getRncFMT ${RNC_NAME}`
+    RNC_FMT_VER=" 7- 2";
+    RNC_FMT_NUM=`echo ${RNC_FMT_VER} | awk -F\- '{printf ($1 * 10) + $2}'`
+
+    RNC_FIV_VER=`getRncFIV ${RNC_NAME}`
+    #RNC_FIV_VER="M8"
+
+    NUM_CELLS=`grep -c "MeContext=${RNC_NAME}," ${UTRANCELL_LIST}`
+    NE_NUM_SUB_FILES=`getNumSubFiles ${RNC_NAME} ${NUM_CELLS}`
+    if [ $? -ne 0 ] ; then
+    log "ERROR: Failed to get number of MPs for ${RNC_NAME}"
+    return 1
+    fi
+
+    #In case you ahve to generate files for ENM then generate specified number of Mp files
+    if [ ${ENV_TYPE} -eq 1 ] ; then
+        local MP_CONFIG
+        MP_CONFIG=`(getMPConfig ${RNC_NAME})`
+        if [ $? -ne 0 ] ; then
+            echo "${MP_CONFIG}"
+            return 1
+        fi
+        local MAX_SUB_FILES=`echo ${MP_CONFIG} | awk -F, '{print $1}'`
+        if [ $? -ne 0 ] ; then
+            log "WARN: Failed to get maximub number of MPs for ${RNC_NAME}. Setting it as 33"
+            MAX_SUB_FILES="33"
+        fi
+        NE_NUM_SUB_FILES=${MAX_SUB_FILES}
+    fi
+
+    #
+    # Create the sub files
+    #
+    SUB_INDEX=1
+    while [ ${SUB_INDEX} -le ${NE_NUM_SUB_FILES} ] ; do
+    makeRncSubFile ${RNC_NAME} ${SUB_INDEX} ${SOURCE_SUB_FILE_DIR} ${NE_PM_DIR} ${SUB_FILENAME} \
+        ${STARTDATE} ${RNC_FMT_NUM}
+    if [ $? -ne 0 ] ; then
+        return 1
+    fi
+
+    SUB_INDEX=`expr ${SUB_INDEX} + 1`
+    done
+
+    #
+    # Create the Main file
+    #
+    SUB_DIR="/c/pm_data"
+    if [ "${CHROOT}" != "yes" ] ; then
+    SUB_DIR="${NE_PM_DIR}/c/pm_data"
+    fi
+
+    FIV_OPT=""
+    if [ ! -z "${RNC_FIV_VER}" ] ; then
+    FIV_OPT="--fiv \"${RNC_FIV_VER}\""
+    fi
+
+    ${MAKE_GPEH} --compressed --output ${NE_PM_DIR}/${MAIN_FILENAME} --date ${STARTDATE} --type main \
+    --fmtver "${RNC_FMT_VER}" --subdir ${SUB_DIR} --numsub ${NE_NUM_SUB_FILES} ${FIV_OPT}
+    gzip -f ${NE_PM_DIR}/${MAIN_FILENAME}
+}
+if [ -r /netsim/netsim_cfg ] ; then
+    . /netsim/netsim_cfg > /dev/null 2>&1
+fi
+
+if [ -z "${GPEH_MAX_CONCURRENT}" ] ; then
+    GPEH_MAX_CONCURRENT=1
+fi
+
+OUT_ROOT=/netsim_users
+if [ -d /pms_tmpfs ] ; then
+   OUT_ROOT=/pms_tmpfs
+fi
+
+SOURCE_SUB_FILE_DIR=/netsim_users/pms/gpeh_templates
+PM_DIR="${OUT_ROOT}/%s/%s/c/pm_data"
+CHROOT="yes"
+ROP_PERIOD_MIN=15
+RNC_LIST="${LIST}"
+ENV_TYPE=0
+
+while getopts  "r:c:t:p:v:l:x:" flag
+do
+    case "$flag" in
+    r) ROP_PERIOD_MIN="$OPTARG";;
+    c) CHROOT="$OPTARG";;
+    t) SOURCE_SUB_FILE_DIR="$OPTARG";;
+    p) PM_DIR="${OPTARG}/%s/%s";;
+    l) RNC_LIST="$OPTARG";;
+    v) ENV_TYPE="$OPTARG";;
+    x) EXEC_FROM_HC="$OPTARG";;
+    *) printf "Usage: %s [-c chroot] [-t Template directory] [-p Destination Dir] [-l RNC_LIST ]\n" $0
+           exit 1;;
+    esac
+done
+
+if [ -z ${ROP_PERIOD_MIN} ] ; then
+    ROP_PERIOD_MIN=15
+fi
+
+MAKE_GPEH="${ROOT_DIR}/makeGpeh"
+if [ ! -x ${MAKE_GPEH} ] ; then
+    echo "ERROR: Cannot file ${MAKE_GPEH}"
+    exit 1
+fi
+
+PROC_TYPE=`uname -p`
+UPDATE_TS=`printf "%s/updatets.%s" ${ROOT_DIR} ${PROC_TYPE}`
+if [ ! -x ${UPDATE_TS} ] ; then
+    echo "ERROR: Cannot find  ${UPDATE_TS}"
+    exit 1
+fi
+
+# Generate Epoch Seconds (UTC always)
+current_epoch=$(date +%s)
+
+ROP_PERIOD_SEC=$((${ROP_PERIOD_MIN}*60))
+
+if [[ ${EXEC_FROM_HC} == "YES" ]]; then
+    start_epoch=$(($((${current_epoch}/60))*60))
+elif [[ ${ROP_PERIOD_SEC} -gt 900 ]];then
+    start_epoch=$(($((${current_epoch}/900))*900))
+else
+    start_epoch=$(($((${current_epoch}/${ROP_PERIOD_SEC}))*${ROP_PERIOD_SEC}))
+fi
+end_epoch=$((${start_epoch}+${ROP_PERIOD_SEC}))
+
+ROP_START_DATE=$(date -u -d @${start_epoch} +'%Y%m%d')
+ROP_START_TIME=$(date -u -d @${start_epoch} +'%H%M')
+ROP_END_TIME=$(date -u -d @${end_epoch} +'%H%M')
+
+STARTDATE="${ROP_START_DATE}${ROP_START_TIME}"
+ENDDATE="${ROP_START_DATE}${ROP_END_TIME}"
+
+log "Start ${STARTDATE}"
+
+MAIN_FILENAME="A${ROP_START_DATE}.${ROP_START_TIME}-${ROP_END_TIME}_gpehfile:2.lnk"
+SUB_FILENAME="A${ROP_START_DATE}.${ROP_START_TIME}-${ROP_END_TIME}_GPEH.lnk"
+
+UTRANCELL_LIST=/netsim_users/pms/etc/utrancell_list.txt
+if [ ! -r ${UTRANCELL_LIST} ] ; then
+    echo "ERROR: Could not find ${UTRANCELL_LIST}"
+    exit 1
+fi
+
+# Setup the support for concurrent execution
+# Make sure we have a seperate directory for each run
+if [ ${GPEH_MAX_CONCURRENT} -gt 1 ]  ; then
+    CC_DIR=/tmp/genGPEH_CC.${ROP_PERIOD_MIN}
+    if [ ! -d ${CC_DIR} ] ; then
+        mkdir ${CC_DIR}
+    else
+    # Remove any existing files to clean up from
+    # any failed runs
+    EXISTS_LIST=$(find ${CC_DIR} -type f)
+    if [ ! -z "${EXISTS_LIST}" ] ; then
+        log "WARNING: Found files in CC_DIR, removing"
+        echo "${EXISTS_LIST}"
+        find ${CC_DIR} -type f -exec rm {} \;
+    fi
+    fi
+fi
+
+#
+# RNC Section
+#
+for RNC_NAME in ${RNC_LIST}; do
+    if grep -q $RNC_NAME "/tmp/showstartednodes.txt"; then
+        if [ ${GPEH_MAX_CONCURRENT} -eq 1 ]  ; then
+            processRNC ${RNC_NAME}
+        else
+            NUM_RUNNING=`ls ${CC_DIR} | wc -l | awk '{print $1}'`
+            while [ ${NUM_RUNNING} -ge ${GPEH_MAX_CONCURRENT} ] ; do
+                sleep 1
+                NUM_RUNNING=`ls ${CC_DIR} | wc -l | awk '{print $1}'`
+            done
+            LOCK_FILE=${CC_DIR}/${STARTDATE}.${RNC_NAME}
+            touch ${LOCK_FILE}
+
+            runConcurrent ${LOCK_FILE} ${RNC_NAME} &
+        fi
+    fi
+done
+wait
+
+#
+# RBS Section
+#
+if [ -r ${SOURCE_SUB_FILE_DIR}/rbs_gpeh_sub.bin ] ; then
+    #
+    # Hack here, use the FMT of the first RNC in LIST
+    #
+    #FIRST_RNC=`echo ${LIST} | awk '{print $1}'`
+    #RBS_FMT_VER=`getRncFMT ${FIRST_RNC}`
+    # As of W10, all RBSs seem to use " 3- 0"
+    RBS_FMT_VER=" 3- 0"
+    if [ -d /c/pm_data ] ; then
+    NE_PM_DIR=/c/pm_data
+    else
+    NE_PM_DIR=`printf ${PM_DIR} Rbs`
+    if [ ! -d ${NE_PM_DIR} ] ; then
+        mkdir -p ${NE_PM_DIR}
+        if [ $? -ne 0 ] ; then
+        echo "ERROR: Cannot create ${NE_PM_DIR}"
+        exit 1
+        fi
+    fi
+    fi
+
+    ${MAKE_GPEH} --output  ${NE_PM_DIR}/${MAIN_FILENAME} --date ${STARTDATE} --type main \
+    --fmtver "${RBS_FMT_VER}" --subdir ${NE_PM_DIR} --numsub 1 --compressed
+    gzip ${NE_PM_DIR}/${MAIN_FILENAME}
+
+    MP_DIR=`printf "${NE_PM_DIR}/p00%02d00" 1`
+    if [ ! -d ${MP_DIR} ] ; then
+    mkdir -p ${MP_DIR}
+    fi
+    SUB_FILENAME="${MP_DIR}/A${ROP_START_DATE}.${ROP_START_TIME}-${ROP_END_TIME}_GPEH.lnk"
+    ${MAKE_GPEH} --input ${SOURCE_SUB_FILE_DIR}/rbs_gpeh_sub.bin --output  ${SUB_FILENAME} \
+    --date ${STARTDATE} --type sub --fmtver "${RBS_FMT_VER}"
+    gzip ${SUB_FILENAME}
+fi
+
+log "End ${STARTDATE}"
+

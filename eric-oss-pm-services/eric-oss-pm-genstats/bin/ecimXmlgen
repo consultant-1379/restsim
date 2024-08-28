@@ -1,0 +1,18 @@
+#!/bin/sh
+# This script invokes the java application which generates templates
+# and counter property files for ECIM nodes.
+
+ROOTDIR=`dirname $0`
+ROOTDIR=`cd $ROOTDIR ; cd .. ; pwd`
+
+
+#JARS=`find ${ROOTDIR}/lib -type f -name '*.jar'`
+JARS=`cd ${ROOTDIR}; find ./jar -type f -name '*.jar'`
+cd ${ROOTDIR}
+JARLIST=""
+for JAR in ${JARS};do
+    JARLIST="${JARLIST}:${JAR}"
+done
+
+
+exec /netsim/inst/platf_indep_java/linux64/jre/bin/java -Xmx1g -cp ${ROOTDIR}/jar/${JARLIST} ecim.stats.main.EcimStatsMain "$@"

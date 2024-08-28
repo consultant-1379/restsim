@@ -1,0 +1,76 @@
+#!/bin/bash
+
+BIN_DIR=`dirname $0`
+BIN_DIR=`cd ${BIN_DIR} ; pwd`
+. ${BIN_DIR}/functions
+
+if [ -r /usr/sbin/sntp ] ; then
+    NTP_CMD="/usr/sbin/sntp -P no -r 159.107.173.12"
+else
+    NTP_CMD="/usr/sbin/ntpdate -s 159.107.173.12"
+fi
+
+DEPLOY=0
+CFG=/netsim/netsim_cfg
+while getopts  "c:s:d" flag
+do
+    case "$flag" in
+	c) CFG="$OPTARG";;
+        d) DEPLOY=1;;
+        s) SERVERS="${OPTARG}";;
+
+	*) echo "ERROR: Usage $0 -g cfg -d [-s servers]"
+           exit 1;;
+    esac
+done
+
+if [ ${DEPLOY} -eq 1 ] ; then
+    if [ -z "${SERVERS}" ] ; then
+	. ${CFG} > /dev/null
+    fi
+    if [ -z "${SERVERS}" ] ; then
+	log "ERROR: SERVERS not set"
+	exit 1
+    fi
+
+    for SERVER in ${SERVERS} ; do
+	log ${SERVER}
+	#XNTPD_PID=`rsh -l root ${SERVER} "pgrep ntpd"`
+	XNTPD_PID=`echo shroot | su root -c "pgrep ntpd"`
+	if [ -z "${XNTPD_PID}" ] ; then
+	    log " ntpd not found, loading workaround"
+            # Put the entry in the crontab
+	    #rsh -l root ${SERVER} "crontab -l 2>&1 | egrep -v '^# |timesync|^no crontab for root' > /tmp/new_crontab 2>&1"
+	    echo shroot | su root -c "crontab -l 2>&1 | egrep -v '^# |timesync|^no crontab for root' > /tmp/new_crontab 2>&1"
+	    
+	    #rsh -l root ${SERVER} "echo \"00 */2 * * * /netsim_users/pms/bin/timesync\" >> /tmp/new_crontab"
+	    echo shroot | su root -c "echo \"00 */2 * * * /netsim_users/pms/bin/timesync\" >> /tmp/new_crontab"
+	    
+	    #rsh -l root ${SERVER} "crontab /tmp/new_crontab"
+	    echo shroot | su root -c "crontab /tmp/new_crontab"
+	    
+	    #rsh -l root ${SERVER} "rm -f /tmp/new_crontab"
+	    echo shroot | su root -c "rm -f /tmp/new_crontab"
+
+	    log " Sync'ing now"
+	    #rsh -l root ${SERVER} "${NTP_CMD}"
+	    echo shroot | su root -c "${NTP_CMD}"
+           log " Sync'ing completed"
+	else
+	    log " ntpd found, workaround not required"
+	fi
+    done
+else
+    XNTPD_PID=`pgrep ntpd`
+    if [ -z "${XNTPD_PID}" ] ; then
+      # Sleep so we don't all hit the ntp server at the same time
+	if [ -z "${SLEEP_TIME}" ] ; then
+	    HOSTNAME=`hostname`
+	    SLEEP_TIME=`getent hosts $HOSTNAME | awk '{print $1}' | awk -F\. '{print $4}'`
+	fi
+	sleep ${SLEEP_TIME}
+	
+	${NTP_CMD}
+    fi
+fi
+

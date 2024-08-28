@@ -1,0 +1,805 @@
+#!/usr/bin/env perl
+
+# $Id: makeRbsStat 79 2011-04-21 15:35:50Z eeicmuy $
+
+use strict;
+
+use Getopt::Long;
+use Compress::Zlib ;
+use Data::Dumper ;
+use File::Basename;
+use Time::Local;
+use File::Copy;
+use File::Spec;
+
+our $DEBUG = 0;
+
+our $RBS = 1;
+our $ERBS = 2;
+our $PRBS = 3;
+our $MSRBS_V1 = 4;
+our $MSRBS_V2 = 5;
+our $WRANMSRBS_V2 = 6;
+
+our %neTypeFilter = (
+    $RBS => '\dRBS',
+    $ERBS  => '\dERBS',
+    $PRBS => '\dPRBS',
+    $MSRBS_V1 => '\dpERBS',
+    $MSRBS_V2 => '\ddg2ERBS',
+    $WRANMSRBS_V2 => '\dMSRBS-V'
+    );
+
+# arrays to store nbiot and eutran entry from eutrancellfdd_list.txt
+our @eutran_cell_list;
+our @nbiot_cell_list;
+our @tdd_cell_list;
+
+# array to track used element in file.
+our @NbIot_used_element;
+our @tdd_used_element;
+
+# arrays to store EUtran, Utran and Geran cell entry from /netsim_users/pms/etc/.cell_relation_file file.
+our @EUtranCellRealtion_lines;
+our @UtranCellRealtion_lines;
+our @GeranCellRealtion_lines;
+
+# array to maintain counter
+our $eutran_counter = 0;
+our $utran_counter = 0;
+our $geran_counter = 0;
+our $eutran_index = 0;
+our $utran_index = 0;
+our $geran_index = 0;
+
+our $new_template_conf = "False";
+our $topology_cell_mapping = "False";
+
+our $global_epoch_dir = "";
+
+our $server_host_name = `hostname`;
+chomp($server_host_name);
+
+sub readCellList($$) {
+    my ($simulation,$neType) = @_;
+
+     my %cellConfig = (
+        'cellMap' => {},
+        'fdnMap' => {},
+        );
+
+
+    my %cellMap = ();
+    my %fdnMap = ();
+    my $nePattern = "";
+    my $rdnIndex = 4;
+
+    if ( "$neType" eq "ERBS" ) {
+          $nePattern = '^MeContext=.*' . $simulation . $neType .'(\d{5,5})';
+    }
+
+    if ( "$neType" eq "dg2ERBS" || "$neType" eq "pERBS" ) {
+          $nePattern = '^ManagedElement='.$simulation . $neType .'(\d{5,5})';
+          $rdnIndex = 3;
+    }
+
+    if ( $DEBUG > 8 ) { print "readCellList: nePattern=$nePattern\n"; }
+    for my $line (@eutran_cell_list) {
+        if ( $DEBUG > 9 ) { print "readCellList: line = $line"; }
+        chop $line;
+        # Following Cell examples
+        #SubNetwork=ONRM_RootMo_R,MeContext=LTE01ERBS00150,ManagedElement=1,ENodeBFunction=1,EUtranCellFDD=LTE01ERBS00150-1
+        #SubNetwork=ONRM_RootMo_R,MeContext=LTE25ERBS00001,ManagedElement=1,ENodeBFunction=1,EUtranCellTDD=LTE25ERBS00001-1
+        #SubNetwork=ONRM_RootMo_R,SubNetwork=LTE01,MeContext=LTE01ERBS00150,ManagedElement=1,ENodeBFunction=1,EUtranCellFDD=LTE01ERBS00150-1
+        #SubNetwork=ONRM_RootMo_R,SubNetwork=LTE01,MeContext=LTE25ERBS00001,ManagedElement=1,ENodeBFunction=1,EUtranCellTDD=LTE25ERBS00001-1
+        #SubNetwork=ERBS-SUBNW-1,MeContext=ieatnetsimv5048-01_LTE01ERBS00068,ManagedElement=1,ENodeBFunction=1,EUtranCellFDD=LTE01ERBS00058-1
+        #SubNetwork=ERBS-SUBNW-1,MeContext=ieatnetsimv5048-01_LTE01ERBS00068,ManagedElement=1,ENodeBFunction=1,EUtranCellTDD=LTE01ERBS00068-1
+        my @rdnList = split( /,/, $line);
+        my $rdnLength = @rdnList;
+        # Get mecontext index from rdnList
+        my $meContextIndex =  $rdnLength - $rdnIndex ;
+        # Get cellName index from rndList
+        my $cellNameIndex = $rdnLength - 1;
+        if ( $DEBUG > 8 ) { print Dumper("readCellList: rdnList", \@rdnList ); }
+        if ( $rdnList[$meContextIndex] =~ /$nePattern/ ) {
+            my $erbsNum = $1;
+            if ( ! exists ($cellConfig{'fdnMap'}->{$erbsNum} )) {
+               my ($fdn) = $line =~ /(.*),ManagedElement=.*/;
+               $cellConfig{'fdnMap'}->{$erbsNum}=$fdn;
+            }
+            my ($cellName) = $rdnList[$cellNameIndex] =~ /^EUtranCell.DD=(.*)/;
+            if ( $cellName eq "" ){
+            	($cellName) = $rdnList[$cellNameIndex] =~ /^NbIotCell=(.*)/;
+            }
+            if ( $DEBUG > 7 ) { print "readCellList: matched erbsNum=$erbsNum cellName=$cellName\n"; }
+            if ( ! exists ($cellConfig{'cellMap'}->{$erbsNum}) ) {
+                $cellConfig{'cellMap'}->{$erbsNum} = [];
+            }
+            push @{$cellConfig{'cellMap'}->{$erbsNum}}, $cellName;
+        }
+    }
+    if ( $DEBUG > 3 ) { print Dumper("readCellList: cellMap", \%cellMap); }
+    return \%cellConfig;
+}
+
+sub getCellName
+{
+    my ($neId,$cellIndex,$r_CellNameMap) = @_;
+    my $result = $r_CellNameMap->{$neId}->[$cellIndex-1];
+    #if the cellname has null value then return the default cellid value
+    if(length($result) == 0){
+       $result=$cellIndex
+    }
+    if ( $DEBUG > 6 ) { print "getCellName: neId=$neId cellIndex=$cellIndex result=$result\n"; }
+    return $result;
+}
+
+sub readTemplate($$) {
+    my ($inFile,$neType) = @_;
+
+    #
+    # Read input template
+    #
+    if ( $inFile eq "-" ) {
+        open INFILE, "<&STDIN";
+    } else {
+        open INFILE, $inFile or die "Could not open inFile $inFile";
+    }
+    my @inLines = <INFILE>;
+    close INFILE;
+
+    my %config = (
+        'nednLineNums' => {},
+        'cellLineNums' => [],
+        'cellIdMap' => {},
+        'cellTypeMap' => {},
+        'managedElementLines' => {}
+        );
+
+    for ( my $i = 0; $i <= $#inLines; $i++ ) {
+        #if ( $DEBUG > 5 ) { print "readTemplate: processing line $inLines[$i]"; }
+
+        if ( $neType == $PRBS || $neType == $MSRBS_V1 || $neType == $MSRBS_V2 || $neType == $WRANMSRBS_V2) {
+            if ( ( ! exists $config{'dnPrefixLineNum'} ) && ($inLines[$i] =~ /dnPrefix=/) ) {
+                $config{'dnPrefixLineNum'} = $i;
+            } elsif ( ($inLines[$i] =~ /EUtranCell(.)DD=(\d+)(.*)/) ) {
+                my ($type,$cellId,$remainder) = ($1,$2,$3);
+                if ( $DEBUG > 5 ) { print "readTemplate: match cell cellId=$cellId remainder=$remainder\n"; }
+
+                push @{$config{'cellLineNums'}}, $i;
+                $config{'cellIdMap'}->{$i} = $cellId;
+                $config{'cellTypeMap'}->{$i} = $type;
+                $inLines[$i] = $remainder;
+            } elsif ( $inLines[$i] =~ /ManagedElement=1/ ) {
+                $config{'managedElementLines'}->{$i} = 1;
+            }
+        } else {
+            if ( ( ! exists $config{'snLineNum'} ) && $inLines[$i] =~ /^<sn>/ ) {
+                $config{'snLineNum'} = $i;
+            } elsif ( $inLines[$i] =~ /^<nedn>/ ) {
+                if ( $DEBUG > 7 ) { print "readTemplate: match nedn i=$i\n"; }
+                $config{'nednLineNums'}->{$i} = 1;
+            } elsif ( ($neType == $ERBS) && ($inLines[$i] =~ /EUtranCell(.)DD=(\d+)(.*)/) ) {
+                my ($type,$cellId,$remainder) = ($1,$2,$3);
+                if ( $DEBUG > 5 ) { print "readTemplate: match cell cellId=$cellId remainder=$remainder\n"; }
+
+                push @{$config{'cellLineNums'}}, $i;
+                $config{'cellIdMap'}->{$i} = $cellId;
+                $config{'cellTypeMap'}->{$i} = $type;
+                $inLines[$i] = $remainder;
+            }
+        }
+    }
+    if ( (! exists $config{'snLineNum'}) &&
+         ($neType != $ERBS) && ($neType != $PRBS) && ($neType != $MSRBS_V1)  && ($neType != $MSRBS_V2) && ($neType != $WRANMSRBS_V2) ) {
+        die "Cannot find sn line, neType=$neType";
+    }
+
+    if ( $DEBUG > 5 ) { print Dumper("readTemplate: config", \%config); }
+
+    $config{'inLines'} = \@inLines;
+    return \%config;
+}
+
+
+sub get_required_cell($$$$) {
+    my ($line,$node_name,$neType,$cell_type) = @_;
+    my $cell_info = (split /=/, $line)[-1];
+    my @cell_list_arr;
+    my @used_ele_arr;
+    if ( $neType == $MSRBS_V2 ) {
+        $cell_info = (split /\"/,$cell_info)[0];
+    } else {
+        $cell_info = (split /</,$cell_info)[0];
+    }
+    if ( "$cell_type" eq "NbIotCell" ){
+    	@cell_list_arr = @nbiot_cell_list;
+    	@used_ele_arr = @NbIot_used_element
+    } elsif ( "$cell_type" eq "EUtranCellTDD" ){
+    	@cell_list_arr = @tdd_cell_list;
+    	@used_ele_arr = @tdd_used_element;
+    } else {
+    	print "ERROR: Wrong $cell_type given.\n";
+    }
+    for my $enodeB (@cell_list_arr){
+    	if ( index($enodeB, $node_name) != -1 ){
+    		if ( grep $_ eq $enodeB, @used_ele_arr ) {
+                next;
+            } else {
+                chomp($enodeB);
+                $line =~ s/,$cell_type=$cell_info/,$cell_type=$enodeB/;
+                push @used_ele_arr, $enodeB;
+                last;
+            }
+    	}
+    }
+    if ( "$cell_type" eq "NbIotCell" ){
+    	@NbIot_used_element = @used_ele_arr;
+    } else {
+    	@tdd_used_element = @used_ele_arr;
+    }
+    return $line;
+}
+
+
+# This method will return line with updated node_name, cell id and cell value for EUtran, Utran and Geran
+sub update_cell_relation($$$$$) {
+    my $tag = $_[0];
+    my @tag_array = @{$_[1]};
+    my $node_name = $_[2];
+    my $ne = $_[3];
+    my $old_line = $_[4];
+
+    my $line = "";
+    my @found = grep { /$node_name/ } @tag_array;
+    my $size = @found;
+    
+    if ( $tag eq ",EUtranCellRelation=" ) {
+        for (my $i=$eutran_counter; $i < $size; $i++) {
+            if (exists $found[$eutran_counter]) {
+                my $value = (split /=/, $found[$eutran_counter])[4];
+                my @values = (split /,/, $value);
+                if (exists $values[$eutran_index]) {
+                    my $node_cell = (split /=/, $found[$eutran_counter])[1];
+                    my $relation_val = $values[$eutran_index];
+                    chomp($relation_val);
+                    $eutran_index += 1;
+                    if ( $ne == $ERBS ) {
+                    	if ( index( $old_line , ",EUtranCellTDD=") != -1 ) {
+                        	$line = "<moid>ManagedElement=1,ENodeBFunction=1,EUtranCellTDD=$node_cell,EUtranFreqRelation=1,EUtranCellRelation=$relation_val</moid>\n";
+                    	} else {
+                    		$line = "<moid>ManagedElement=1,ENodeBFunction=1,EUtranCellFDD=$node_cell,EUtranFreqRelation=1,EUtranCellRelation=$relation_val</moid>\n";
+                    	}
+                    } else {
+                    	if ( index( $old_line , ",EUtranCellTDD=") != -1 ) {
+                    		$line = "<measValue measObjLdn=\"ManagedElement=$node_name,ENodeBFunction=1,EUtranCellTDD=$node_cell,EUtranFreqRelation=1,EUtranCellRelation=$relation_val\">\n";
+                    	} else {
+                    		$line = "<measValue measObjLdn=\"ManagedElement=$node_name,ENodeBFunction=1,EUtranCellFDD=$node_cell,EUtranFreqRelation=1,EUtranCellRelation=$relation_val\">\n";
+                    	}
+                    }
+                    last;
+                } else {
+                    $eutran_counter += 1;
+                    $eutran_index = 0;
+                }
+            } else {
+                return $old_line;
+            }
+        }
+    } elsif ( $tag eq ",UtranCellRelation=" ) {
+        for (my $i=$utran_counter; $i < $size; $i++) {
+            if (exists $found[$utran_counter]) {
+                my $value = (split /=/, $found[$utran_counter])[4];
+                my @values = (split /,/, $value);
+                if (exists $values[$utran_index]) {
+                    my $node_cell = (split /=/, $found[$utran_counter])[1];
+                    my $relation_val = $values[$utran_index];
+                    chomp($relation_val);
+                    $utran_index += 1;
+                    if ( $ne == $ERBS ) {
+                    	if ( index( $old_line , ",EUtranCellTDD=") != -1 ) {
+                    		$line = "<moid>ManagedElement=1,ENodeBFunction=1,EUtranCellTDD=$node_cell,UtranTDDFreqRelation=1,UtranCellRelation=$relation_val</moid>\n";
+                    	} else {
+                    		$line = "<moid>ManagedElement=1,ENodeBFunction=1,EUtranCellFDD=$node_cell,UtranTDDFreqRelation=1,UtranCellRelation=$relation_val</moid>\n";
+                    	}
+                    } else {
+                    	if ( index( $old_line , ",EUtranCellTDD=") != -1 ) {
+                        	$line = "<measValue measObjLdn=\"ManagedElement=$node_name,ENodeBFunction=1,EUtranCellTDD=$node_cell,UtranFreqRelation=1,UtranCellRelation=$relation_val\">\n";
+                    	} else {
+                    		$line = "<measValue measObjLdn=\"ManagedElement=$node_name,ENodeBFunction=1,EUtranCellFDD=$node_cell,UtranFreqRelation=1,UtranCellRelation=$relation_val\">\n";
+                    	}
+                    }
+                    last;
+                } else {
+                    $utran_counter += 1;
+                    $utran_index = 0;
+                }
+            } else {
+                return $old_line;
+            }
+        }
+    } elsif ( $tag eq ",GeranCellRelation=" ) {
+        for (my $i=$geran_counter; $i < $size; $i++) {
+            if (exists $found[$geran_counter]) {
+                my $value = (split /=/, $found[$geran_counter])[4];
+                my @values = (split /,/, $value);
+                if (exists $values[$geran_index]) {
+                    my $node_cell = (split /=/, $found[$geran_counter])[1];
+                    my $relation_val = $values[$geran_index];
+                    chomp($relation_val);
+                    $geran_index += 1;
+                    if ( $ne == $ERBS ) {
+                    	if ( index( $old_line , ",EUtranCellTDD=") != -1 ) {
+                    		$line = "<moid>ManagedElement=1,ENodeBFunction=1,EUtranCellTDD=$node_cell,GeranFreqGroupRelation=1,GeranCellRelation=$relation_val</moid>\n";
+                    	} else {
+                        	$line = "<moid>ManagedElement=1,ENodeBFunction=1,EUtranCellFDD=$node_cell,GeranFreqGroupRelation=1,GeranCellRelation=$relation_val</moid>\n";
+                    	}
+                    } else {
+                    	if ( index( $old_line , ",EUtranCellTDD=") != -1 ) {
+                        	$line = "<measValue measObjLdn=\"ManagedElement=$node_name,ENodeBFunction=1,EUtranCellTDD=$node_cell,GeranFreqGroupRelation=1,GeranCellRelation=$relation_val\">\n";
+                    	} else {
+                    		$line = "<measValue measObjLdn=\"ManagedElement=$node_name,ENodeBFunction=1,EUtranCellFDD=$node_cell,GeranFreqGroupRelation=1,GeranCellRelation=$relation_val\">\n";
+                    	}
+                    }
+                    last;
+                } else {
+                    $geran_counter += 1;
+                    $geran_index = 0;
+                }
+            } else {
+                return $old_line;
+            }
+        }
+    }
+    if ( $line eq "" ) {
+        return $old_line;
+    } else {
+        return $line;
+    }
+}
+
+
+sub writeFile($$$$$$) {
+    my ($destFile,$thisFdn,$r_templateCfg,$neType,$rbsNum,$r_CellNameMap) = @_;
+    my $location_file = '/netsim/genstats/transport_sim_details';
+    my $site_location;
+    #
+    # Generally we have CPU/Memory to spare and we want to minimize Disk I/O
+    # So build the file contents in memory and then use a single call to write
+    # the compressed data
+    #
+    my @outlines = ();
+    @NbIot_used_element = ();
+    @tdd_used_element = ();
+
+    my $thisSnLine = sprintf "<sn>%s<\/sn>\n", $thisFdn;
+    my $nednLine = sprintf "<nedn>%s<\/nedn>\n", $thisFdn;
+
+    my ($mgtElementId) = $thisFdn =~ /=([^,=]+)$/;
+    my $mgtElementRdn = "ManagedElement=$mgtElementId";
+
+    my $cellLineIndex = 0;
+    my $node_name = (split /=/, $thisFdn)[-1];
+    my $maxCellLineIndex = $#{$r_templateCfg->{'cellLineNums'}};
+
+    if ( index($mgtElementId, "dg2ERBS") != -1 ) {
+        if ( -f $location_file ) {
+            open(my $content, '<:encoding(UTF-8)', $location_file)
+                or die "Could not open file '$location_file' $!";
+            while (my $row = <$content>) {
+                if ( index($row, "$mgtElementId>>") != -1 ) {
+                    my @fields = split />>/, $row;
+                    $site_location = $fields[1];
+                    $site_location =~ s/\"//g;
+                    chomp($site_location);
+                    last;
+                }
+            }
+        }
+    }
+
+    for ( my $lineNum = 0; $lineNum <= $#{$r_templateCfg->{'inLines'}} ; $lineNum++ ) {
+        if ( $DEBUG > 9 ) { print "lineNum: $lineNum $r_templateCfg->{'inLines'}->[$lineNum]"; }
+        if ( $neType == $PRBS || $neType == $MSRBS_V1 || $neType == $MSRBS_V2 || $neType == $WRANMSRBS_V2) {
+            if ( $lineNum == $r_templateCfg->{'dnPrefixLineNum'} ) {
+                my $line = $r_templateCfg->{'inLines'}->[$lineNum];
+                $line =~ s/dnPrefix=\"[^\"]+\"/dnPrefix="$thisFdn"/;
+                push @outlines, $line;
+            } elsif ( exists $r_templateCfg->{'managedElementLines'}->{$lineNum} ) {
+                my $line = $r_templateCfg->{'inLines'}->[$lineNum];
+                if ( $neType == $MSRBS_V2 ) {
+                    if ( index($line, "localDn=") != -1 ) {
+                        if ( $site_location ne "" ) {
+                            $line =~ s/ManagedElement=1/$site_location/;
+                        } else {
+                            if ( index($line, "<fileSender localDn=") != -1 ) {
+                                $line =~ s/<fileSender localDn=\"ManagedElement=1\"\/>/<fileSender\/>/;
+                            } elsif ( index($line, "<managedElement swVersion=\"r0.1\"") != -1 ) {
+                                $line =~ s/<managedElement swVersion=\"r0.1\" localDn=\"ManagedElement=1\"\/>/<managedElement swVersion=\"r0.1\"\/>/;
+                            }
+                        }
+                    } elsif ( index($line, ",NbIotCell=") != -1 ) {
+                        $line = get_required_cell($line,$node_name,$neType,"NbIotCell");
+                    } else {
+                        $line =~ s/ManagedElement=1/$mgtElementRdn/;
+                    }
+                } else {
+                    $line =~ s/ManagedElement=1/$mgtElementRdn/;
+                }
+                push @outlines, $line;
+            } elsif ( ($cellLineIndex <= $maxCellLineIndex) &&
+$lineNum == $r_templateCfg->{'cellLineNums'}->[$cellLineIndex] ) {
+                my $cellLine = "<measValue measObjLdn=\"ManagedElement=$mgtElementId,ENodeBFunction=1,EUtranCell" .
+                $r_templateCfg->{'cellTypeMap'}->{$lineNum} .
+                "DD=" .
+                getCellName($rbsNum,$r_templateCfg->{'cellIdMap'}->{$lineNum}, $r_CellNameMap) .
+                $r_templateCfg->{'inLines'}->[$lineNum] . "\n";
+                if ( index($cellLine, ",EUtranCellTDD=") != -1){
+                	$cellLine = get_required_cell($cellLine,$node_name,$neType,"EUtranCellTDD");
+                }
+                if ( $DEBUG > 5 ) { print "writeFile: cellLine=$cellLine"; }
+                if ( $topology_cell_mapping eq "True" ) {
+
+                    if ( $neType == $MSRBS_V2 || $neType == $MSRBS_V1 ) {
+                        if ( index($cellLine, ",EUtranCellRelation=") != -1 ) {
+                            $cellLine = update_cell_relation(",EUtranCellRelation=",\@EUtranCellRealtion_lines,$node_name,$neType,$cellLine);
+                        } elsif ( index($cellLine, ",UtranCellRelation=") != -1 ) {
+                            $cellLine = update_cell_relation(",UtranCellRelation=",\@UtranCellRealtion_lines,$node_name,$neType,$cellLine);
+                        } elsif ( index($cellLine, ",GeranCellRelation=") != -1 ) {
+                            $cellLine = update_cell_relation(",GeranCellRelation=",\@GeranCellRealtion_lines,$node_name,$neType,$cellLine);
+                        }
+                    }
+                }
+                push @outlines, $cellLine;
+                $cellLineIndex++;
+            } else {
+                push @outlines, $r_templateCfg->{'inLines'}->[$lineNum];
+            }
+        } else { # CPP ERBS or RBS
+            if ( (exists $r_templateCfg->{'snLineNum'}) && ($lineNum == $r_templateCfg->{'snLineNum'}) ) {
+                if ( $DEBUG > 7 ) { print "replacing sn line\n" };
+                push @outlines, $thisSnLine;
+            } elsif ( exists $r_templateCfg->{'nednLineNums'}->{$lineNum} ) {
+                if ( $DEBUG > 7 ) { print "replacing nedn line\n" };
+                push @outlines, $nednLine;
+            } else {
+                if ( $neType == $RBS ) {
+                    push @outlines, $r_templateCfg->{'inLines'}->[$lineNum];
+                } else {
+                    # LTE ERBS: Need to replace lines using
+                    #ManagedElement=1,ENodeBFunction=1,EUtranCellFDD=LTEO1ERBS00001-1
+            if ( ($cellLineIndex <= $maxCellLineIndex) &&
+             ($lineNum == $r_templateCfg->{'cellLineNums'}->[$cellLineIndex]) ) {
+            if ( $DEBUG > 7 ) { print "writeFile: lineNum=$lineNum cellLineNums[$cellLineIndex]=" . $r_templateCfg->{'cellLineNums'}->[$cellLineIndex] . "\n"; }
+                        my $cellLine = "<moid>ManagedElement=1,ENodeBFunction=1,EUtranCell" .
+                            $r_templateCfg->{'cellTypeMap'}->{$lineNum} .
+                            "DD=" .
+                            getCellName($rbsNum,$r_templateCfg->{'cellIdMap'}->{$lineNum}, $r_CellNameMap) .
+                            $r_templateCfg->{'inLines'}->[$lineNum] . "\n";
+                        if ( index($cellLine, ",EUtranCellTDD=") != -1){
+                			$cellLine = get_required_cell($cellLine,$node_name,$neType,"EUtranCellTDD");
+                		}
+                        if ( $DEBUG > 5 ) { print "writeFile: cellLine=$cellLine"; }
+                        if ( $neType == $ERBS && $topology_cell_mapping eq "True" ) {
+                            if ( index($cellLine, ",EUtranCellRelation=") != -1 ) {
+                                $cellLine = update_cell_relation(",EUtranCellRelation=",\@EUtranCellRealtion_lines,$node_name,$neType,$cellLine);
+                            } elsif ( index($cellLine, ",UtranCellRelation=") != -1 ) {
+                                $cellLine = update_cell_relation(",UtranCellRelation=",\@UtranCellRealtion_lines,$node_name,$neType,$cellLine);
+                            } elsif ( index($cellLine, ",GeranCellRelation=") != -1 ) {
+                                $cellLine = update_cell_relation(",GeranCellRelation=",\@GeranCellRealtion_lines,$node_name,$neType,$cellLine);
+                            }
+                        }
+                        push @outlines, $cellLine;
+                        $cellLineIndex++;
+                    } else {
+                        my $line = $r_templateCfg->{'inLines'}->[$lineNum];
+                        if ( index($line,",NbIotCell=") != -1 && $neType == $ERBS ){
+                            $line = get_required_cell($line,$node_name,$neType,"NbIotCell");
+                        }
+                        push @outlines, $line;
+                    }
+                }
+            }
+        }
+
+     }
+
+      # Now convert outlines into a single string
+      # Write the data to disk
+      my $outdata = join('', @outlines);
+      # if file extension is gz then compress the file else generate an uncompressed file
+          if ( $destFile=~m/.xml.gz/ ) {
+              my $gzStream = gzopen($destFile, "wb");
+              ( defined $gzStream ) or die "Failed to open $destFile";
+              $gzStream->gzwrite($outdata);
+              $gzStream->gzclose();
+
+          } else {
+              open UNCOMPRESSED, ">$destFile";
+              print UNCOMPRESSED $outdata;
+              close UNCOMPRESSED;
+          }
+
+    my $full_path = File::Spec->catdir(dirname($destFile), $global_epoch_dir);
+    mkdir $full_path;
+    move($destFile, $full_path);
+
+    $eutran_counter = 0;
+    $utran_counter = 0;
+    $geran_counter = 0;
+    $eutran_index = 0;
+    $geran_index = 0;
+    $utran_index = 0;
+}
+
+
+sub find_end_element($){
+	my $line_ele = $_[0];
+	my $ret_val = (split /=/, $line_ele)[-1];
+	$ret_val =~ s/\r|\n//g;
+	return $ret_val;
+}
+
+sub get_cell_cnt($$$){
+	my $node = $_[0];
+	my $ele_ = $_[1];
+	my $type = $_[2];
+	
+	my $counter = 0;
+	my @ele_finder;
+	my $ele_counter;
+	
+	if ( "$type" eq "NbIot" ) {
+		@ele_finder = grep { /$node/ } @nbiot_cell_list;
+	} else {
+		@ele_finder = grep { /$node/ } @tdd_cell_list;
+	}
+	
+	for my $nid (@ele_finder){
+        for my $cid (@$ele_){
+            if ( "$nid" eq "$cid" ){
+                $counter += 1;
+				last;
+            }
+        }
+    }
+    
+	return $counter;
+}
+
+sub main
+{
+    my ($path,$fdn,$rnc,$inFile,$neTypeStr,$cellListFile,$simDir,$sym_link_dir,$sym_link_prefix,$epoch_dir);
+    # RNC_NAME and RBS_NUM are replaced in path and fdn with
+    # the rnc name and rbs number
+    my $oss_enabled = "False";
+    my $result = GetOptions(
+        "rnc=s" =>\$rnc,
+        "inFile=s" =>\$inFile,
+        "path=s" =>\$path,
+        "fdn=s" => \$fdn,
+        "netype=s" => \$neTypeStr,
+        "celllist=s" => \$cellListFile,
+        "simdir=s" => \$simDir,
+        "oss=s" => \$oss_enabled,
+        "linkdir=s" => \$sym_link_dir,
+        "symlink=s" => \$sym_link_prefix,
+        "epoch_dir=s" => \$epoch_dir,
+        "debug=n" => \$DEBUG
+        );
+    ( $result == 1 ) or die("Invalid Args");
+    my $output_path_oss = "/ossrc/data/pms/segment1/";
+    my $neType = $RBS;
+    my $r_CellNameMap = undef;
+    my $map = undef;
+    my $fdnMap = undef;
+    my %templateCfgMap = ();
+    $global_epoch_dir = $epoch_dir;
+
+    if ( $neTypeStr eq 'ERBS' || $neTypeStr eq 'MSRBS_V1' || $neTypeStr eq 'MSRBS_V2' ) {
+        my $line;
+        my $nbiot_element;
+        my $tdd_element;
+        $line =~ s/\r|\n//g;
+        open eutran_cell_data, $cellListFile or die "Cannot open $cellListFile";
+            while ( $line = <eutran_cell_data> ) {
+                if ( index($line, ",NbIotCell=") != -1 ) {
+                	$nbiot_element = find_end_element($line);
+                    push @nbiot_cell_list, $nbiot_element;
+                } elsif ( index($line, ",EUtranCellTDD=") != -1 ) {
+                	$tdd_element = find_end_element($line);
+                 	push @tdd_cell_list, $tdd_element;
+                }
+                push @eutran_cell_list, $line;
+            }
+        close eutran_cell_data;
+
+        my $topology_relation_file = "/netsim_users/pms/etc/.cell_relation_file";
+
+        # check for file, if exists then it will store topology data in array.
+        if ( -e $topology_relation_file ) {
+            $topology_cell_mapping = "True";
+        }
+
+        if ( $topology_cell_mapping eq "True" ) {
+            open topology_data, $topology_relation_file or die "Cannot open $topology_relation_file";
+                while ( $line = <topology_data> ) {
+                    if ( (split /=/, $line)[0] eq $rnc ) {
+                        my $cell_relation_tag = (split /=/, $line)[2];
+                        if ( $cell_relation_tag eq "EUtranCellRelation" ) {
+                            push @EUtranCellRealtion_lines, $line;
+                        } elsif ( $cell_relation_tag eq "UtranCellRelation" ) {
+                            push @UtranCellRealtion_lines, $line;
+                        } elsif ( $cell_relation_tag eq "GeranCellRelation" ) {
+                            push @GeranCellRealtion_lines, $line;
+                        }
+                    }
+                }
+            close topology_data;
+        }
+    }
+
+    if ( defined $neTypeStr ) {
+        if ( $neTypeStr eq 'ERBS' ) {
+            $neType = $ERBS;
+            $map = readCellList($rnc,"ERBS");
+            $r_CellNameMap = $map->{'cellMap'};
+            $fdnMap = $map->{'fdnMap'};
+        } elsif ( $neTypeStr eq 'RBS' ) {
+            $neType = $RBS;
+        } elsif ( $neTypeStr eq 'PRBS' ) {
+            $neType = $PRBS;
+        } elsif ( $neTypeStr eq 'MSRBS_V1' ) {
+            $neType = $MSRBS_V1;
+            $map = readCellList($rnc,"pERBS");
+            $r_CellNameMap = $map->{'cellMap'};
+            $fdnMap = $map->{'fdnMap'};
+        } elsif ( $neTypeStr eq 'MSRBS_V2' ) {
+            $neType = $MSRBS_V2;
+            $map = readCellList($rnc,"dg2ERBS");
+            $r_CellNameMap = $map->{'cellMap'};
+            $fdnMap = $map->{'fdnMap'};
+        } elsif ( $neTypeStr eq 'WRANMSRBS_V2' ) {
+            $neType = $WRANMSRBS_V2;
+        } else {
+            die "Unknown netype $neTypeStr";
+        }
+    }
+
+    my $r_templateCfg = undef;
+    
+    if ( $inFile ne "-" ) {
+        my @templateFiles = split (';',$inFile) ;
+        if ( index($inFile, ":") != -1 ) {
+            $new_template_conf = "True";
+        }
+    	foreach my $template (@templateFiles) {
+       		if ( $template ne '' ) {
+        		if ( $DEBUG > 0 ) { print "Processing template $template\n"; }
+        		my ($cells) = $template =~ /.*_(.*)CELLS.*/;
+        		$r_templateCfg = readTemplate($template,$neType);
+        		$templateCfgMap{$cells} = $r_templateCfg;
+       		}
+    	}
+    } else {
+        $r_templateCfg = readTemplate($inFile,$neType);
+        $templateCfgMap{'DEFAULT'} = $r_templateCfg;
+    }
+
+    opendir DIR, $simDir or die "Cannot list $simDir";
+    my @neDirs_1 = readdir DIR;
+    close DIR;
+    #
+    # Write output files
+    #
+    my $filter = $neTypeFilter{$neType};
+    my $sim_id = (split '\-', $rnc)[-1]; 
+    my @neDirs = grep /$sim_id/, @neDirs_1 ;
+    my $length = @neDirs;
+    foreach my $neDir ( @neDirs ) {
+        if ( $neDir !~  /$filter/ ) {
+            if ( $DEBUG > 0 ) { print "Skipping dir $neDir\n"; }
+            next;
+        }
+        if ( $neDir !~ /$sim_id/ ) {
+            if ($ DEBUG > 0 ) { print "Skipping for DMI $neDir\n"; }
+            next;
+        }
+
+
+        my @ne = split(/=/, $neDir);
+        my @f = `grep $ne[$#ne] "/tmp/showstartednodes.txt" | grep "STATS"`;
+        my $neLength = @f;
+        if ( $neLength < 1 ) {
+            next;
+        }
+
+        my ($rbsIndex) = $neDir =~ /(\d+)$/;
+        $rbsIndex =~ s/^0+//;
+        my $rbsNum;
+        if ( $neType == $RBS || $neType == $PRBS || $neType == $WRANMSRBS_V2) {
+            $rbsNum = sprintf "%02d", $rbsIndex;
+        } else {
+            $rbsNum = sprintf "%05d", $rbsIndex;
+        }
+
+        my $destFile = $path;
+        $destFile =~ s/RNC_NAME/$rnc/g;
+
+        if (index($rnc, "RBS") != -1) {
+            my $rncrbsnum = $rnc."RBSRBS_NUM";
+            $destFile =~ s/$rncrbsnum/$neDir/g;
+        }
+        else {
+            $destFile =~ s/RBS_NUM/$rbsNum/g;
+        }
+        my $destDir = dirname($destFile);
+        if ( $DEBUG > 5 ) { print "rbsIndex=$rbsIndex Checking directory $destDir\n"; }
+        if ( !-e $destDir ) {
+            mkdir $destDir or die "Failed to create directory";
+        }
+        if ( ! -d $destDir ) {
+            if ( $DEBUG > 5 ) { print "Directory $destDir not found, skipping\n"; }
+            next;
+        }
+
+        my $thisFdn = $fdnMap->{$rbsNum} ;
+        my $cells =  $r_CellNameMap->{$rbsNum} ;
+        if ( defined $cells && $inFile ne "-" ) {
+            my $nbiot_cell_count = 0;
+            my $tdd_cell_count = 0;
+            if ( $new_template_conf eq "True" ) {
+            	my $Node_Id = (split /=/, $thisFdn)[-1];
+            	$nbiot_cell_count += get_cell_cnt($Node_Id,$cells,"NbIot");
+            	$tdd_cell_count += get_cell_cnt($Node_Id,$cells,"TDD");
+            }
+            my $size = @$cells;
+            my $cell_formation_str;
+            if ( $new_template_conf eq "True" ) {
+            	$size = @$cells - $tdd_cell_count - $nbiot_cell_count;
+            	$cell_formation_str = "$size:$tdd_cell_count:$nbiot_cell_count";
+                $r_templateCfg = $templateCfgMap{$cell_formation_str};
+            } else {
+            	$cell_formation_str = $size;
+                $r_templateCfg = $templateCfgMap{$cell_formation_str};
+            }
+            if ( $DEBUG > 5 )  { print "Cell count $cell_formation_str for Node Number $rbsNum for SIM $rnc \n" ; }
+            if ( $size > 0) {
+            
+            if (! defined $r_templateCfg) {
+                print "ERROR : No template with CELL count $cell_formation_str for SIM $rnc Node Number : $rbsNum \n";
+                exit 1;
+            }
+        }
+
+        }
+        else {
+        $r_templateCfg = $templateCfgMap{'DEFAULT'};
+        if (! defined $r_templateCfg) {
+            print "ERROR : No defualt template for SIM $rnc\n";
+            exit 1;
+            }
+        }
+
+        if(! defined $thisFdn){
+             $thisFdn = $fdn;
+             $thisFdn =~ s/RNC_NAME/$rnc/g;
+             $thisFdn =~ s/RBS_NUM/$rbsNum/g;
+        }
+        if ( $DEBUG > 5 ) { print "rbsIndex=$rbsIndex destFile=$destFile thisFdn=$thisFdn\n"; }
+
+        writeFile($destFile,$thisFdn,$r_templateCfg,$neType,$rbsNum,$r_CellNameMap);
+        if ( "$oss_enabled" eq "True" ){
+            move($destFile, $output_path_oss);
+            my $link_file = (split /\//, $destFile)[-1];
+            symlink("$sym_link_prefix$output_path_oss$link_file", "$sym_link_dir$link_file");
+            my $filename = '/netsim/etc/Pm_Rop_Info.txt';
+            open(my $fh, '>>', $filename) or die "Could not open file '$filename' $!";
+            print $fh "$output_path_oss$link_file\n";
+            close $fh;
+        }
+    }
+}
+
+main();
+

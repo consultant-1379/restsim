@@ -1,0 +1,376 @@
+#!/usr/bin/env perl
+
+#
+# Extract the list of PM counter names for each MO type from an MOM xml file
+#
+
+use Getopt::Long;
+use Data::Dumper;
+use File::Copy;
+use strict;
+
+my $DEBUG = 0;
+
+main();
+
+sub printUsage
+{
+    print "getPmCounters --xml XmlMomFile [--outputCfg outputCfgFile] [--baseCfg baseCfgFile] [--outputOpts outputOpts] [--baseOpts baseOpts] [ --results resultsFile ] [ --totals ] [ --pdf pdfFile ]\n";
+    exit 1;
+}
+
+sub main
+{
+    my ($momXmlFile,$outputFile,$cfgFile,$outputOpts,$baseOpts,$resultFile,$pdfFile,$printTotals,$outpFile);
+    my $result = GetOptions(
+			    "xml=s"   => \$momXmlFile,
+			    "outputCfg=s" => \$outputFile,
+			    "baseCfg=s" => \$cfgFile,
+			    "outputOpts=s" => \$outputOpts,
+			    "baseOpts=s" => \$baseOpts,
+			    "results=s" => \$resultFile,
+			    "totals" => \$printTotals,
+			    "pdf=s" => \$pdfFile,
+			    "debug=s" => \$DEBUG
+			    );
+    ($result == 1) or printUsage();
+    ( defined $momXmlFile ) or printUsage();
+
+
+    my %cntrInfo = ();
+    my %relations = ();
+    parseFile($momXmlFile,\%cntrInfo,\%relations);
+
+     my %mocInfo = ();
+
+    if($cfgFile)
+    {
+      parseCFGFile($cfgFile,\%mocInfo);
+    }
+
+    if ( $DEBUG > 6 ) { print Dumper("mocInfo", %mocInfo);}
+
+    if ( $printTotals )
+    {
+		#printf "%-25s %10s %10s %10s %10s\n", "MO", "Normal Cntr", "PDF Cntr", "PDF Value", "Total";
+
+		foreach my $moc ( sort keys %cntrInfo )
+		{
+			my $r_CntrList = $cntrInfo{$moc};
+			my $normal = 0;
+			my $pdf = 0;
+			my $pdfValues = 0;
+			foreach my $r_Cntr ( @{$r_CntrList} )
+			{
+				if ( $r_Cntr->{'type'} eq 'normal' )
+				{
+					$normal++;
+				}
+				else
+				{
+					$pdf++;
+					$pdfValues += $r_Cntr->{'pdfvalues'};
+				}
+			}
+
+
+			#printf "%-25s %10s %10s %10s %10s\n",  $moc, $normal, $pdf, $pdfValues, ($normal + $pdfValues);
+		}
+    }
+
+
+    if ( $outputFile )
+    {
+		open OUTPUT, ">$outputFile" or die "Cannot open $outputFile";
+
+		#print "\n\nNew MOs in $momXmlFile with details:\n\n\n";
+		#printf "%-25s %-20s %-20s \n", "MO", "No. of Instances", "Parent MO";
+		my $default_moc_count = 1;
+		foreach my $moc ( sort keys %cntrInfo )
+		{
+			print OUTPUT $moc;
+
+			if(exists $mocInfo{$moc})
+			{
+
+					 print OUTPUT ",$mocInfo{$moc}";
+			}
+			else
+				{
+					#printf "%-25s %-20s %-20s \n", $moc,$default_moc_count,$relations{$moc};
+			print OUTPUT ",$default_moc_count,$relations{$moc}";
+			}
+
+			print OUTPUT "\n";
+		}
+		close OUTPUT;
+     }
+
+    if ( $resultFile )
+    {
+		open RESULTS, ">$resultFile" or die "Cannot open $resultFile";
+
+		foreach my $moc ( sort keys %cntrInfo )
+		{
+			print RESULTS $moc;
+			my $r_CntrList = $cntrInfo{$moc};
+			foreach my $r_Cntr ( @{$r_CntrList} )
+			{
+			print RESULTS ",", $r_Cntr->{'name'};
+			}
+
+			print RESULTS "\n";
+		}
+
+		close RESULTS;
+    }
+
+    if ( $pdfFile )
+    {
+	open FILE, ">$pdfFile" or die "Cannot open $pdfFile";
+	foreach my $moc ( sort keys %cntrInfo )
+	{
+	    my $r_CntrList = $cntrInfo{$moc};
+	    foreach my $r_Cntr ( @{$r_CntrList} )
+	    {
+			if ( $r_Cntr->{'type'} eq 'pdf' )
+			{
+				printf FILE "%s %s %d\n", $moc, $r_Cntr->{'name'}, $r_Cntr->{'pdfvalues'};
+			}
+	    }
+	}
+
+	close FILE;
+    }
+
+   checkAndGenOptsFile($outputOpts,$baseOpts);
+
+}
+
+sub parseFile
+{
+    my ($xmlFile,$r_cntrInfo,$relation_info) = @_;
+
+    open XML, $xmlFile or die "Cannot open $xmlFile";
+    while ( my $line = getLine() )
+    {
+		if ( $line =~ /^\s+\<class name=\"([^\"]+)\"/ )
+		{
+			my $moc = $1;
+			if ( $DEBUG > 6 ) { print "parseFile: found moc $moc\n" };
+
+			my @cntrList = ();
+			while ( ($line = getLine()) && ($line !~ /^\s+\<\/class/) )
+				{
+				if ( $line =~ /^\s+\<attribute name=\"([^\"]+)\"/ )
+				{
+					my $attrName = $1;
+					if ( $DEBUG > 7 ) { print "parseFile: found attribute $attrName\n" };
+
+					if ( $attrName =~ /^pm/ )
+					{
+					if ( $DEBUG > 6 ) { print "parseFile: found cntr $attrName\n" };
+
+					my @description = ();
+					my $numValue = 0;
+					while ( ($line = getLine()) && ($line !~ /\/description/) )
+					{
+						if ( $line =~ /(\d+)\]/ )
+						{
+						$numValue = $1 + 1;
+						}
+					}
+
+					if ( $DEBUG > 6 ) { print "parseFile: end description numValue=$numValue\n" };
+
+					my $pdf = 0;
+					while ( ($line = getLine()) && ($line !~ /dataType/) ) {}
+
+					$line = getLine();
+
+					if ( $DEBUG > 6 ) { print "parseFile: check for sequence in dataType $line" };
+
+					if ( $line =~ /sequence/ )
+					{
+						$pdf = 1;
+					}
+
+
+					if ( $DEBUG > 6 ) { print "parseFile: is pdf = $pdf\n" };
+
+					getLine(); # seq type
+					$line = getLine();
+					if ( $line =~ /maxLength\>(\d+)/ )
+					{
+						$numValue = $1;
+						if ( $DEBUG > 6 ) { print "parseFile: numValue = $numValue\n" };
+					}
+
+
+					my $r_Cntr = {
+						'name' => $attrName
+						};
+
+					if ( $pdf )
+					{
+						$r_Cntr->{'type'} = 'pdf';
+						$r_Cntr->{'pdfvalues'} = $numValue;
+					}
+					else
+					{
+						$r_Cntr->{'type'} = 'normal';
+					}
+
+					push @cntrList, $r_Cntr;
+					}
+				}
+			}
+			if ( $DEBUG > 6 ) { print "parseFile: end class\n" };
+
+			if ( $#cntrList > - 1 )
+			{
+			$r_cntrInfo->{$moc} = \@cntrList;
+			}
+		}
+		elsif ( $line =~ /^\s+\<relationship name=\"([^\"]+)\"/ )
+		{
+			# Read the relationships from xml mom file
+			# fetch the parent and child from relationships tag
+			# store them in the relations hashes
+			my $parent="";
+					my $child="";
+			 while ( ($line = getLine()) && ($line !~ /^\s+\<\/relationship/) )
+			 {
+
+				if ($line =~ /^\s+\<parent/)
+				{
+
+				  #if line contains parent start tag then read till parent end tag is encountered
+				  while ( ($line = getLine()) && ($line !~ /^\s+\<\/parent/) )
+				  {
+									# fetch the parent name
+								if ( $line =~ /^\s+\<hasClass name=\"([^\"]+)\"/ )
+								{
+										$parent = $1;
+								}
+				  }
+				}
+				elsif ($line =~ /^\s+\<child/)
+				{
+				  #if line contains child start tag then read till child end tag is encountered
+				  while ( ($line = getLine()) && ($line !~ /^\s+\<\/child/) )
+				  {
+					# fetch the child name
+					if ( $line =~ /^\s+\<hasClass name=\"([^\"]+)\"/ )
+					{
+							$child = $1;
+					}
+				 }
+				}
+			}
+			if ( $DEBUG > 8 ) {print "parent: $parent child: $child\n";}
+
+			$relation_info->{$child}=$parent;
+		}
+
+
+    }
+    close XML;
+
+    if ( $DEBUG > 4 ) { print Dumper("parseFile: cntrInfo", $r_cntrInfo); }
+}
+
+
+#This method will read the cfg file and will the store the MOC information
+#in mocInfo hashes
+#moc name will be key of the hashes
+#remaining data will be the value
+sub parseCFGFile
+{
+
+   my ($cfgFile,$moc_info) = @_;
+
+   open CFG, $cfgFile or die "Cannot open $cfgFile";
+   while ( my $line = getCFGLine() )
+    {
+
+		my $moc_sep=",";
+		my $pos = index ($line, $moc_sep);
+		my $moc = substr ($line,0,$pos);
+			my $moc_data = substr ($line,$pos + length($moc_sep),length($line));
+		if ( $DEBUG > 8 ) {print "moc: $moc moc info: $moc_data";}
+		chomp $moc_data;
+		$moc_info->{$moc}=$moc_data;
+    }
+
+    close CFG;
+}
+
+sub getLine
+{
+    my $line;
+    while ( ($line = <XML>) && ($line =~ /^\s*$/) )
+    {
+		if ( $DEBUG > 10 ) { print "getLine: blank $line"; }
+    }
+
+    if ( $DEBUG > 8 ) { print "getLine: $line"; }
+
+    return $line;
+}
+
+#This method will fetch the line from CFG file
+#and will return only non empty and non commented line
+sub getCFGLine
+{
+    my $line;
+
+    while ( ($line = <CFG>) && (($line =~ /^\s*$/) || ($line =~ /^\#/)))
+    {
+		if ( $DEBUG > 10 ) { print "getCFGLine: blank or commented $line"; }
+    }
+
+    if ( $DEBUG > 8 ) { print "getCFGLine: $line"; }
+
+    return $line;
+
+}
+
+# This method check if opts file generation if selected and if so then generated the
+# opts file based on whether base opts file provided or not.
+sub checkAndGenOptsFile
+{
+
+  my ($outFile,$baseFile) = @_;
+
+    if ( $outFile )
+    {
+
+		if ( $baseFile )
+		{
+				copy($baseFile,$outFile) or die "Copy failed: $!";
+		}
+		else
+		{
+			open OUTOPTS, ">$outFile" or die "Cannot open $outFile";
+
+			print OUTOPTS "UtranCell pmRes1 FIXED[0]=258\n";
+			print OUTOPTS "UtranCell pmRes10 FIXED[0]=5891\n";
+			print OUTOPTS "UtranCell pmRes11 FIXED[0]=6147\n";
+			print OUTOPTS "UtranCell pmRes12 FIXED[0]=6403\n";
+			print OUTOPTS "UtranCell pmRes2 FIXED[0]=514\n";
+			print OUTOPTS "UtranCell pmRes3 FIXED[0]=771\n";
+			print OUTOPTS "UtranCell pmRes4 FIXED[0]=2308\n";
+			print OUTOPTS "UtranCell pmRes5 FIXED[0]=3077\n";
+			print OUTOPTS "UtranCell pmRes6 FIXED[0]=4609\n";
+			print OUTOPTS "UtranCell pmRes7 FIXED[0]=5123\n";
+			print OUTOPTS "UtranCell pmRes8 FIXED[0]=5378\n";
+			print OUTOPTS "UtranCell pmRes9 FIXED[0]=5635\n";
+
+			close OUTOPTS;
+
+		}
+    }
+
+}
+

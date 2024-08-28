@@ -1,0 +1,1 @@
+SGSN:PIU,EthPort,IpEquipmentPositionNetworkPm,Ss7SctpDPInstance,IpInterfacePm

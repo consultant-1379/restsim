@@ -1,0 +1,16 @@
+{
+  "ENM_ID_LIST": [""],
+  "NR_SIMS_PER_ENM" : "4",
+  "NR_MIM_RELEASE" : "21-Q4-V1",
+  "NR_NES_PER_SIM" : "2000",
+  "TOTAL_STARTED_NR_NES" : "500",
+  "PCC_SIMS_PER_ENM" : "3",
+  "PCC_MIM_RELEASE" : "21-Q4-V1",
+  "PCC_NES_PER_SIM" : "10",
+  "TOTAL_STARTED_PCC_NES" : "0",
+  "PCG_SIMS_PER_ENM" : "2",
+  "PCG_MIM_RELEASE" : "21-Q4-V1",
+  "PCG_NES_PER_SIM" : "15",
+  "TOTAL_STARTED_PCG_NES" : "0"
+
+}

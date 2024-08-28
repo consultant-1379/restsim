@@ -1,0 +1,236 @@
+>> .show started
+
+'server_00060_LTE_PCC_1-9-V3@ieatnetsimv20207' for LTE PCC 1-9-V3
+=================================================================
+    NE                       Address          Simulation/Commands
+    5G132PCC001              30.22.60.160 1161 public v2 .128.0.0.193.1.30.22.60.160 5G-Yang-FT-PCC-1-9-V3x2-5G132_5G132PCC001 authpass privpass hmac_md5 cbc_des  /netsim/netsimdir/5G-Yang-FT-PCC-1-9-V3x2-5G132
+
+'server_00061_LTE_PCG_1-7-V1@ieatnetsimv20207' for LTE PCG 1-7-V1
+=================================================================
+    NE                       Address          Simulation/Commands
+    5G118PCG001              30.22.60.164 1161 public v2 .128.0.0.193.1.30.22.60.164 5G-Yang-FT-PCG-1-7-V1x2-5G118_5G118PCG001 authpass privpass hmac_md5 cbc_des  /netsim/netsimdir/5G-Yang-FT-PCG-1-7-V1x2-5G118
+
+'server_00094_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR192gNodeBRadio00040    30.29.36.252 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.252 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00039    30.29.36.250 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.250 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00038    30.29.36.249 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.249 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00037    30.29.36.248 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.248 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+
+'server_00093_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR192gNodeBRadio00036    30.29.36.247 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.247 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00035    30.29.36.244 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.244 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00034    30.29.36.243 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.243 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00033    30.29.36.242 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.242 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+
+'server_00092_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR192gNodeBRadio00032    30.29.36.241 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.241 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00031    30.29.36.239 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.239 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00030    30.29.36.238 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.238 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00029    30.29.36.235 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.235 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+
+'server_00091_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR192gNodeBRadio00028    30.29.36.234 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.234 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00027    30.29.36.233 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.233 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00026    30.29.36.232 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.232 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00025    30.29.36.231 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.231 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+
+'server_00090_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR192gNodeBRadio00024    30.29.36.230 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.230 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00023    30.29.36.23 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.23 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00022    30.29.36.227 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.227 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00021    30.29.36.226 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.226 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+
+'server_00089_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR192gNodeBRadio00020    30.29.35.43 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.43 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00019    30.29.35.42 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.42 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00018    30.29.35.41 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.41 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00017    30.29.35.40 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.40 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+
+'server_00088_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR192gNodeBRadio00016    30.29.35.30 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.30 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00015    30.29.35.28 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.28 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00014    30.29.35.26 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.26 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00013    30.29.35.255 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.255 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+
+'server_00087_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR192gNodeBRadio00012    30.29.35.247 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.247 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00011    30.29.35.246 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.246 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00010    30.29.35.245 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.245 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00009    30.29.35.24 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.24 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+
+'server_00086_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR192gNodeBRadio00008    30.29.35.226 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.226 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00007    30.29.35.225 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.225 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00006    30.29.35.222 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.222 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00005    30.29.35.221 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.221 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+
+'server_00085_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR192gNodeBRadio00004    30.29.35.210 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.210 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00003    30.29.35.209 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.209 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00002    30.29.35.208 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.208 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+    NR192gNodeBRadio00001    30.29.35.207 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.207 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR192
+
+'server_00084_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR280gNodeBRadio00040    30.29.36.225 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.225 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00039    30.29.36.224 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.224 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00038    30.29.36.223 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.223 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00037    30.29.36.220 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.220 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+
+'server_00083_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR280gNodeBRadio00036    30.29.36.217 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.217 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00035    30.29.36.216 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.216 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00034    30.29.36.214 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.214 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00033    30.29.36.212 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.212 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+
+'server_00082_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR280gNodeBRadio00032    30.29.36.211 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.211 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00031    30.29.36.210 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.210 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00030    30.29.36.21 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.21 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00029    30.29.36.208 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.208 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+
+'server_00081_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR280gNodeBRadio00028    30.29.36.207 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.207 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00027    30.29.36.203 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.203 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00026    30.29.36.202 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.202 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00025    30.29.36.201 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.201 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+
+'server_00080_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR280gNodeBRadio00024    30.29.36.200 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.200 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00023    30.29.36.199 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.199 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00022    30.29.36.190 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.190 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00021    30.29.36.180 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.180 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+
+'server_00079_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR280gNodeBRadio00020    30.29.36.179 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.179 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00019    30.29.36.175 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.175 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00018    30.29.36.170 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.170 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00017    30.29.36.17 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.17 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+
+'server_00078_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR280gNodeBRadio00016    30.29.36.167 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.167 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00015    30.29.36.166 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.166 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00014    30.29.36.164 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.164 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00013    30.29.36.162 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.162 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+
+'server_00077_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR280gNodeBRadio00012    30.29.36.161 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.161 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00011    30.29.36.159 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.159 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00010    30.29.36.156 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.156 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00009    30.29.36.151 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.151 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+
+'server_00076_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR280gNodeBRadio00008    30.29.36.150 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.150 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00007    30.29.36.149 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.149 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00006    30.29.36.148 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.148 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00005    30.29.36.147 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.147 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+
+'server_00075_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR280gNodeBRadio00004    30.29.36.145 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.145 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00003    30.29.36.144 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.144 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00002    30.29.36.141 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.141 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+    NR280gNodeBRadio00001    30.29.36.140 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.140 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR280
+
+'server_00074_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR120gNodeBRadio00040    30.29.36.14 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.14 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00039    30.29.36.139 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.139 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00038    30.29.36.138 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.138 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00037    30.29.36.136 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.136 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+
+'server_00073_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR120gNodeBRadio00036    30.29.36.134 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.134 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00035    30.29.36.125 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.125 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00034    30.29.36.120 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.120 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00033    30.29.36.117 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.117 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+
+'server_00071_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR120gNodeBRadio00028    30.29.36.109 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.109 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00027    30.29.36.107 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.107 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00026    30.29.36.10 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.10 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00025    30.29.36.0 161 public v3+v2+v1 .128.0.0.193.1.30.29.36.0 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+
+'server_00070_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR120gNodeBRadio00024    30.29.35.95 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.95 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00023    30.29.35.93 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.93 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00022    30.29.35.91 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.91 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00021    30.29.35.84 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.84 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+
+'server_00069_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR120gNodeBRadio00020    30.29.35.80 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.80 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00019    30.29.35.79 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.79 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00018    30.29.35.78 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.78 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00017    30.29.35.76 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.76 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+
+'server_00068_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR120gNodeBRadio00016    30.29.35.74 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.74 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00015    30.29.35.73 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.73 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00014    30.29.35.72 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.72 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00013    30.29.35.71 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.71 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+
+'server_00067_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR120gNodeBRadio00012    30.29.35.70 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.70 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00011    30.29.35.69 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.69 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00010    30.29.35.68 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.68 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00009    30.29.35.66 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.66 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+
+'server_00066_LTE_MSRBS-V2_21-Q4-V1@ieatnetsimv20205' for LTE MSRBS-V2 21-Q4-V1
+=================================================================
+    NE                       Address          Simulation/Commands 
+    NR120gNodeBRadio00008    30.29.35.61 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.61 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00007    30.29.35.59 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.59 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00006    30.29.35.58 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.58 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+    NR120gNodeBRadio00005    30.29.35.57 161 public v3+v2+v1 .128.0.0.193.1.30.29.35.57 mediation authpass privpass none none  [TLS] /netsim/netsimdir/NR21-Q4-V1x40-gNodeBRadio-NRAT-NR120
+

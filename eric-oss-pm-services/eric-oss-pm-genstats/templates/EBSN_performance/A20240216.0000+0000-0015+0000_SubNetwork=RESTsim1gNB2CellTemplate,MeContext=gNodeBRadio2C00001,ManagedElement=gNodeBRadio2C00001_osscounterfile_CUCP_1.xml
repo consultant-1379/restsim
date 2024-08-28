@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>		
+<?xml-stylesheet type="text/xsl" href="MeasDataCollection.xsl"?>		
+<measCollecFile xmlns="http://www.3gpp.org/ftp/specs/archive/32_series/32.435#measCollec">		
+    <fileHeader fileFormatVersion="32.435 V10.0" vendorName="Ericsson AB">		
+        <fileSender localDn="SubNetwork=RESTsim1gNB2CellTemplate,MeContext=gNodeBRadio2C00001,ManagedElement=gNodeBRadio2C00001" elementType="OSS"/>		
+        <measCollec beginTime="2024-02-16T00:00:00+00:00"/>		
+    </fileHeader>		
+    <measData>		
+        <managedElement localDn="SubNetwork=RESTsim1gNB2CellTemplate,MeContext=gNodeBRadio2C00001,ManagedElement=gNodeBRadio2C00001" userLabel="gNodeBRadio2C00001" swVersion="CXP2020013/15_R37A02"/>		
+        <measInfo>		
+            <granPeriod duration="PT900S" endTime="2024-02-16T00:15:00+00:00"/>		
+            <repPeriod duration="PT900S"/>		
+            <measType p="1">pmEbsDrbEstabAttInit5qi</measType>		
+            <measType p="2">pmEbsDrbEstabSuccInit5qi</measType>		
+            <measType p="3">pmEbsNgSigConnEstabAtt</measType>		
+            <measType p="4">pmEbsNgSigConnEstabSucc</measType>		
+            <measType p="5">pmEbsRrcConnEstabAtt</measType>		
+            <measType p="6">pmEbsRrcConnEstabSucc</measType>		
+            <measType p="7">pmEbsRrcConnReestFallbackAtt</measType>		
+            <measType p="8">pmEbsRrcConnReestFallbackSucc</measType>		
+            <measType p="9">pmEbsDrbEstabAtt5qi_mcc100mnc101_sst1sd1</measType>		
+            <measType p="10">pmEbsDrbEstabAtt5qi_mcc100mnc101_sst1sd3</measType>		
+            <measType p="11">pmEbsDrbEstabSucc5qi_mcc100mnc101_sst1sd1</measType>		
+            <measType p="12">pmEbsDrbEstabSucc5qi_mcc100mnc101_sst1sd3</measType>		
+            <measType p="13">pmEbsDrbResumeAtt5qi_mcc100mnc101_sst1sd1</measType>		
+            <measType p="14">pmEbsDrbResumeAtt5qi_mcc100mnc101_sst1sd3</measType>		
+            <measType p="15">pmEbsDrbResumeSucc5qi_mcc100mnc101_sst1sd1</measType>		
+            <measType p="16">pmEbsDrbResumeSucc5qi_mcc100mnc101_sst1sd3</measType>		
+            <measType p="17">pmEbsHoExeAttOutDrbEutran_mcc100mnc101_sst1sd1</measType>		
+            <measType p="18">pmEbsHoExeAttOutDrbEutran_mcc100mnc101_sst1sd3</measType>		
+            <measType p="19">pmEbsHoExeAttOutDrbInterGnb_mcc100mnc101_sst1sd1</measType>		
+            <measType p="20">pmEbsHoExeAttOutDrbInterGnb_mcc100mnc101_sst1sd3</measType>		
+            <measType p="21">pmEbsHoExeAttOutDrbIntraGnb_mcc100mnc101_sst1sd1</measType>		
+            <measType p="22">pmEbsHoExeAttOutDrbIntraGnb_mcc100mnc101_sst1sd3</measType>		
+            <measType p="23">pmEbsHoExeSuccOutDrbEutran_mcc100mnc101_sst1sd1</measType>		
+            <measType p="24">pmEbsHoExeSuccOutDrbEutran_mcc100mnc101_sst1sd3</measType>		
+            <measType p="25">pmEbsHoExeSuccOutDrbInterGnb_mcc100mnc101_sst1sd1</measType>		
+            <measType p="26">pmEbsHoExeSuccOutDrbInterGnb_mcc100mnc101_sst1sd3</measType>		
+            <measType p="27">pmEbsHoExeSuccOutDrbIntraGnb_mcc100mnc101_sst1sd1</measType>		
+            <measType p="28">pmEbsHoExeSuccOutDrbIntraGnb_mcc100mnc101_sst1sd3</measType>		
+            <measType p="29">pmEbsHoPrepAttOutDrbEutran_mcc100mnc101_sst1sd1</measType>		
+            <measType p="30">pmEbsHoPrepAttOutDrbEutran_mcc100mnc101_sst1sd3</measType>		
+            <measType p="31">pmEbsHoPrepAttOutDrbInterGnb_mcc100mnc101_sst1sd1</measType>		
+            <measType p="32">pmEbsHoPrepAttOutDrbInterGnb_mcc100mnc101_sst1sd3</measType>		
+            <measType p="33">pmEbsHoPrepAttOutDrbIntraGnb_mcc100mnc101_sst1sd1</measType>		
+            <measType p="34">pmEbsHoPrepAttOutDrbIntraGnb_mcc100mnc101_sst1sd3</measType>		
+            <measType p="35">pmEbsHoPrepSuccOutDrbEutran_mcc100mnc101_sst1sd1</measType>		
+            <measType p="36">pmEbsHoPrepSuccOutDrbEutran_mcc100mnc101_sst1sd3</measType>		
+            <measType p="37">pmEbsHoPrepSuccOutDrbInterGnb_mcc100mnc101_sst1sd1</measType>		
+            <measType p="38">pmEbsHoPrepSuccOutDrbInterGnb_mcc100mnc101_sst1sd3</measType>		
+            <measType p="39">pmEbsHoPrepSuccOutDrbIntraGnb_mcc100mnc101_sst1sd1</measType>		
+            <measType p="40">pmEbsHoPrepSuccOutDrbIntraGnb_mcc100mnc101_sst1sd3</measType>		
+            <measType p="41">pmEbsRrcResumeAtt_mcc100mnc101_sst1sd1</measType>		
+            <measType p="42">pmEbsRrcResumeAtt_mcc100mnc101_sst1sd3</measType>		
+            <measType p="43">pmEbsRrcResumeAttFallback_mcc100mnc101_sst1sd1</measType>		
+            <measType p="44">pmEbsRrcResumeAttFallback_mcc100mnc101_sst1sd3</measType>		
+            <measType p="45">pmEbsRrcResumeSuccFallback_mcc100mnc101_sst1sd1</measType>		
+            <measType p="46">pmEbsRrcResumeSuccFallback_mcc100mnc101_sst1sd3</measType>		
+            <measType p="47">pmEbsRrcResumeSuccResume_mcc100mnc101_sst1sd1</measType>		
+            <measType p="48">pmEbsRrcResumeSuccResume_mcc100mnc101_sst1sd3</measType>		
+            <measValue measObjLdn="ManagedElement=gNodeBRadio2C00001,GNBCUCPFunction=1,NRCellCU=gNodeBRadio2C00001-1">		
+                <r p="1">2,5,391,6,176</r>		
+                <r p="2">2,5,755,6,790</r>		
+                <r p="3">750</r>		
+                <r p="4">160</r>		
+                <r p="5">959</r>		
+                <r p="6">467</r>		
+                <r p="7">711</r>		
+                <r p="8">451</r>		
+                <r p="9">2,5,690,6,945</r>		
+                <r p="10">2,5,463,6,907</r>		
+                <r p="11">2,5,205,6,394</r>		
+                <r p="12">2,5,46,6,71</r>		
+                <r p="13">2,5,932,6,112</r>		
+                <r p="14">2,5,276,6,852</r>		
+                <r p="15">2,5,182,6,318</r>		
+                <r p="16">2,5,581,6,733</r>		
+                <r p="17">929</r>		
+                <r p="18">584</r>		
+                <r p="19">584</r>		
+                <r p="20">319</r>		
+                <r p="21">385</r>		
+                <r p="22">364</r>		
+                <r p="23">139</r>		
+                <r p="24">183</r>		
+                <r p="25">642</r>		
+                <r p="26">376</r>		
+                <r p="27">810</r>		
+                <r p="28">91</r>		
+                <r p="29">941</r>		
+                <r p="30">427</r>		
+                <r p="31">15</r>		
+                <r p="32">547</r>		
+                <r p="33">360</r>		
+                <r p="34">980</r>		
+                <r p="35">418</r>		
+                <r p="36">237</r>		
+                <r p="37">855</r>		
+                <r p="38">736</r>		
+                <r p="39">384</r>		
+                <r p="40">524</r>		
+                <r p="41">826</r>		
+                <r p="42">241</r>		
+                <r p="43">461</r>		
+                <r p="44">167</r>		
+                <r p="45">97</r>		
+                <r p="46">642</r>		
+                <r p="47">643</r>		
+                <r p="48">878</r>		
+            </measValue>		
+            <measValue measObjLdn="ManagedElement=gNodeBRadio2C00001,GNBCUCPFunction=1,NRCellCU=gNodeBRadio2C00001-2">		
+                <r p="1">2,5,747,6,95</r>		
+                <r p="2">2,5,788,6,823</r>		
+                <r p="3">675</r>		
+                <r p="4">547</r>		
+                <r p="5">491</r>		
+                <r p="6">346</r>		
+                <r p="7">972</r>		
+                <r p="8">905</r>		
+                <r p="9">2,5,408,6,611</r>		
+                <r p="10">2,5,459,6,537</r>		
+                <r p="11">2,5,146,6,76</r>		
+                <r p="12">2,5,377,6,463</r>		
+                <r p="13">2,5,953,6,848</r>		
+                <r p="14">2,5,830,6,693</r>		
+                <r p="15">2,5,882,6,494</r>		
+                <r p="16">2,5,775,6,729</r>		
+                <r p="17">36</r>		
+                <r p="18">498</r>		
+                <r p="19">587</r>		
+                <r p="20">825</r>		
+                <r p="21">471</r>		
+                <r p="22">508</r>		
+                <r p="23">537</r>		
+                <r p="24">463</r>		
+                <r p="25">824</r>		
+                <r p="26">916</r>		
+                <r p="27">6</r>		
+                <r p="28">804</r>		
+                <r p="29">872</r>		
+                <r p="30">360</r>		
+                <r p="31">70</r>		
+                <r p="32">825</r>		
+                <r p="33">756</r>		
+                <r p="34">639</r>		
+                <r p="35">792</r>		
+                <r p="36">855</r>		
+                <r p="37">673</r>		
+                <r p="38">693</r>		
+                <r p="39">815</r>		
+                <r p="40">350</r>		
+                <r p="41">617</r>		
+                <r p="42">523</r>		
+                <r p="43">427</r>		
+                <r p="44">203</r>		
+                <r p="45">144</r>		
+                <r p="46">11</r>		
+                <r p="47">731</r>		
+                <r p="48">40</r>		
+            </measValue>		
+        </measInfo>		
+    </measData>		
+    <fileFooter>		
+        <measCollec endTime="2024-02-16T00:15:00+00:00"/>		
+    </fileFooter>		
+</measCollecFile>		

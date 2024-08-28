@@ -1,0 +1,176 @@
+#!/usr/bin/env perl
+
+# $Id: splitWNCSascii 71 2010-11-30 14:28:29Z eeicmuy $
+
+use strict;
+use Getopt::Long;
+use Data::Dumper;
+
+our $DEBUG = 0;
+
+main();
+
+sub main
+{
+    my ($inFile,$outDir,$cellMp,$limitCells,$eventsPerCell);
+    my %eventCounts = ();
+    my $result = GetOptions(
+	"in=s"   => \$inFile,
+	"outdir=s" => \$outDir,
+	"limitcells=s" => \$limitCells,
+	"cellmp=s" => \$cellMp,
+	"epc=s" => \$eventsPerCell,
+	"debug=s" => \$DEBUG
+    );			    
+    ($result == 1) or die "Invalid args";
+
+    open IN, $inFile or die "Cannot open $inFile";
+    
+    my @header = ();
+    
+    my $r_EventLines;
+    my ($currCid);
+    
+    my $READ_HEADER = 0;
+    my $FIND_EVENT_START = 1;
+    my $FIND_EVENT_END = 2;
+    my $state = $READ_HEADER;
+
+    my @events = ();
+    my %eventsPerCell = ();
+
+    my %allCellIds = (); # Used to work out number of cells => number of MPs
+    my $usedCellIdCount = 0;
+
+    my $startTime = time();
+    while ( my $line = <IN> )
+    {
+	if ( $DEBUG > 9 ) { print "main: state=$state line=$line"; }
+	
+	if ( $state == $READ_HEADER )
+	{
+	    if ( $line !~ /^\s+GPEH_HEADER/ )
+	    {
+		push @header, $line;
+	    }
+	    else
+	    {
+		$state = $FIND_EVENT_START;
+	    }
+	}
+	elsif ( $state == $FIND_EVENT_START )
+	{
+	    if ( $line =~ /^\s+GPEH_EVENT_/ )
+	    {
+		$r_EventLines = [];
+		push @{$r_EventLines}, $line;
+		$state = $FIND_EVENT_END;
+	    }
+	}
+	elsif ( $state == $FIND_EVENT_END )
+	{
+	    push @{$r_EventLines}, $line;
+	    
+	    if ( $line =~ /^\s+cId1 (\d+)/ )
+	    {
+		$currCid = $1;
+		$allCellIds{$currCid}++;
+		if ( $DEBUG > 5 ) { print "main: cellId = $currCid\n"; }
+	    }
+	    elsif ( $line =~ /^\s+}/ )
+	    {
+		my $useEvent = 0;
+		if ( defined $limitCells ) {
+		    if ( exists $eventsPerCell{$currCid} ) {
+			$useEvent = 1;
+		    } elsif ( $usedCellIdCount <= $limitCells ) {
+			$useEvent = 1;
+			$usedCellIdCount++;
+		    }
+		} else {
+		    $useEvent = 1;
+		}
+
+		if ( $useEvent == 1 ) {
+		    my $r_event = {
+			'cid'   => $currCid,
+			'lines' => $r_EventLines
+		    };
+		    push @events, $r_event;
+		    
+		    if ( ! exists $eventsPerCell{$currCid} ) {
+			$eventsPerCell{$currCid} = [];
+		    }
+		    push @{$eventsPerCell{$currCid}}, $r_event;
+		}
+
+		$state = $FIND_EVENT_START;
+	    }
+	}
+    }
+    close IN;
+    my $endTime = time();
+    if ( $DEBUG > 0 ) { print "parseTime = ", ($endTime - $startTime), "\n"; }
+
+    my @cidList = sort { $a <=> $b } keys %eventsPerCell;
+
+    # If we have a target events per cell
+    if ( defined $eventsPerCell ) {
+	foreach my $cid ( @cidList ) {
+	    my $r_loadedEvents = $eventsPerCell{$cid};
+	    my $count = $#{$r_loadedEvents} + 1;
+	    if ( $DEBUG > 2 ) { print "main: cid=$cid count=$count\n"; }
+	    for ( my $index = 0; $index < ($eventsPerCell - $count); $index++ ) {
+		my $copyIndex = $index % ($#{$r_loadedEvents} + 1);
+		if ( $DEBUG > 3 ) { print "main: index=$index copyIndex=$copyIndex\n"; }		   
+		push @events, $r_loadedEvents->[ $copyIndex ];
+	    }
+	}
+    }
+    # Distribute the events between the MPs
+    my @allCellIds = sort { $a <= $b } keys %allCellIds;
+
+    my $numCells = $#allCellIds + 1;
+    my $numMps = int($numCells / $cellMp);  
+    if ( $DEBUG > 0 ) { print "numCells=$numCells numMps=$numMps\n"; }
+
+    my %mpForCell = ();
+    my $mpId = 1;
+    foreach my $cId ( @cidList ) {
+	$mpForCell{$cId} = $mpId;
+	$mpId++;
+	if ( $mpId > $numMps ) {
+	    $mpId = 1;
+	}
+    }
+
+    my %eventsForMp = ();
+    foreach my $r_event ( @events ) {
+	$mpId = $mpForCell{$r_event->{'cid'}};
+	if ( ! exists $eventsForMp{$mpId} ) { 
+	    $eventsForMp{$mpId} = [];
+	}
+	push @{$eventsForMp{$mpId}}, $r_event->{'lines'};
+    }
+
+    foreach my $mpId ( sort { $a <=> $b } keys %eventsForMp )
+    {
+	if ( $DEBUG > 1 ) { print "main: opening file for MP $mpId\n"; }
+	open OUT, ">$outDir/$mpId.asc";
+	foreach my $hLine ( @header )
+	{
+	    print OUT $hLine;
+	}
+    
+	foreach my $r_EventLines ( @{$eventsForMp{$mpId}} )
+	{
+	    foreach my $eLine ( @{$r_EventLines} )
+	    {
+		print OUT $eLine;
+	    }
+	}
+
+        print OUT "GPEH_FOOTER\n{\n}\n}\n";
+	close OUT;
+    }
+}

@@ -1,0 +1,6 @@
+apiVersion: v2
+appVersion: latest
+description: A Helm chart for Kubernetes
+name: eric-oss-pm-solution
+type: application
+version: 1.0.0-1

@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "eric-oss-pm-solution.fullname" . }}
+  labels:
+    {{- include "eric-oss-pm-solution.labels" . | nindent 4 }}
+data:
+  config.json: |-
+    {
+      "ENM_ID_LIST": {{ toJson .Values.enm_id_list }},
+      "NR_SIMS_PER_ENM": "{{ .Values.nr.sims_per_enm }}",
+      "NR_MIM_RELEASE": {{  toJson .Values.nr.mim_release }},
+      "NR_NES_PER_SIM": "{{ .Values.nr.nes_per_sim }}",
+      "TOTAL_STARTED_NR_NES": "{{ .Values.nr.total_started }}",
+      "NR_CTR_FILES": "{{ .Values.nr.ctr_files }}",
+      "NR_STATS_FILES": "{{ .Values.nr.stats_files }}",
+      "PCC_SIMS_PER_ENM": "{{ .Values.pcc.sims_per_enm }}",
+      "PCC_MIM_RELEASE": {{  toJson .Values.pcc.mim_release }},
+      "PCC_NES_PER_SIM": "{{ .Values.pcc.nes_per_sim }}",
+      "TOTAL_STARTED_PCC_NES": "{{ .Values.pcc.total_started }}",
+      "PCC_AMF_SIMS_PER_ENM": "{{ .Values.pcc_amf.sims_per_enm }}",
+      "PCC_AMF_MIM_RELEASE": {{  toJson .Values.pcc_amf.mim_release }},
+      "PCC_AMF_NES_PER_SIM": "{{ .Values.pcc_amf.nes_per_sim }}",
+      "TOTAL_STARTED_PCC_AMF_NES": "{{ .Values.pcc_amf.total_started }}",
+      "PCG_SIMS_PER_ENM": "{{ .Values.pcg.sims_per_enm }}",
+      "PCG_MIM_RELEASE": {{  toJson .Values.pcg.mim_release }},
+      "PCG_NES_PER_SIM": "{{ .Values.pcg.nes_per_sim }}",
+      "TOTAL_STARTED_PCG_NES": "{{ .Values.pcg.total_started }}",
+      "LTE_DG2_SIMS_PER_ENM": "{{ .Values.lte_dg2.sims_per_enm }}",
+      "LTE_DG2_MIM_RELEASE": {{  toJson .Values.lte_dg2.mim_release }},
+      "LTE_DG2_NES_PER_SIM": "{{ .Values.lte_dg2.nes_per_sim }}",
+      "LTE_DG2_CTR_FILES": "{{ .Values.lte_dg2.ctr_files }}",
+      "LTE_DG2_STATS_FILES": "{{ .Values.lte_dg2.stats_files }}",
+      "TOTAL_STARTED_LTE_DG2_NES": "{{ .Values.lte_dg2.total_started }}",
+      "NR_EBSN_SIMS_PER_ENM": "{{ .Values.ebsn.sims_per_enm }}",
+      "NR_EBSN_MIM_RELEASE": {{  toJson .Values.ebsn.mim_release }},
+      "NR_EBSN_NES_PER_SIM": "{{ .Values.ebsn.nes_per_sim }}",
+      "TOTAL_STARTED_NR_EBSN_NES": "{{ .Values.ebsn.total_started }}",
+      "VDU_SIMS_PER_ENM": "{{ .Values.cnf_vdu.sims_per_enm }}",
+      "TOTAL_STARTED_VDU_NES": "{{ .Values.cnf_vdu.total_started }}",
+      "VDU_MIM_RELEASE": {{  toJson .Values.cnf_vdu.mim_release }},
+      "VDU_NES_PER_SIM": "{{ .Values.cnf_vdu.nes_per_sim }}",
+      "VCUCP_SIMS_PER_ENM": "{{ .Values.cnf_vcucp.sims_per_enm }}",
+      "TOTAL_STARTED_VCUCP_NES": "{{ .Values.cnf_vcucp.total_started }}",
+      "VCUCP_MIM_RELEASE": {{  toJson .Values.cnf_vcucp.mim_release }},
+      "VCUCP_NES_PER_SIM": "{{ .Values.cnf_vcucp.nes_per_sim }}",
+      "VCUUP_SIMS_PER_ENM": "{{ .Values.cnf_vcuup.sims_per_enm }}",
+      "TOTAL_STARTED_VCUUP_NES": "{{ .Values.cnf_vcuup.total_started }}",
+      "VCUUP_MIM_RELEASE": {{  toJson .Values.cnf_vcuup.mim_release }},
+      "VCUUP_NES_PER_SIM": "{{ .Values.cnf_vcuup.nes_per_sim }}"
+    }

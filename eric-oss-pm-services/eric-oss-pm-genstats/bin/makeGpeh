@@ -1,0 +1,708 @@
+#!/usr/bin/env perl
+
+# $Id: makeGpeh 83 2012-01-25 09:03:50Z eeicmuy $
+
+use strict;
+use Getopt::Long;
+use Data::Dumper;
+use IO::File;
+use Time::Local;
+use Data::Dumper;
+
+our $DEBUG = 0;
+
+# Field                    Size
+#
+# File Format Version      5
+# Year (four digits)       2
+# Month                    1
+# Day                      1
+# Hour                     1
+# Minute                   1
+# Second                   1
+# NE user label            200
+# NE logical name          200
+# File information version 5
+our $HEADER_FMT =    "A5ncccccA200A200";
+	
+# Field                    Size
+#
+# File Format Version      5
+# Year (four digits)       2
+# Month                    1
+# Day                      1
+# Hour                     1
+# Minute                   1
+# Second                   1
+# NE user label            200
+# NE logical name          200
+# File information version 5
+our $HEADER_FMT_71 = "A5ncccccA200A200A5";
+
+our $RECORDING_FMT = "";
+our $PROTOCOL_FMT = "CA50A30";
+our $FOOTER_FMT = "nccccc";
+
+our $LINK_FMT = "A256";
+
+our %EVENT_ID_MAP = ();
+
+our $FOOTER_SIZE = 11;
+
+our $REC_HEADER = 0;
+our $REC_LNK    = 8; 
+our $REC_EVENT  = 4;
+our $REC_FOOTER = 7;
+
+
+our %REC_TYPE_NAMES =
+    (
+     0 => 'HEADER',
+     4 => 'EVENT',
+     7 => 'FOOTER'
+     );
+
+our $HOUR_MASK  = 0b11111000000000000000000000000000;
+our $MIN_MASK   = 0b00000111111000000000000000000000;
+our $SEC_MASK   = 0b00000000000111111000000000000000;
+our $MSEC_MASK  = 0b00000000000000000111111111110000;
+our $EID1_MASK  = 0b00000000000000000000000000001111;
+our $EID2_MASK  = 0b11111110000000000000000000000000;
+
+our $HOUR_SHIFT  = 27;
+our $MIN_SHIFT   = 21;
+our $SEC_SHIFT   = 15;
+our $MSEC_SHIFT  = 4;
+
+our $EID1_SHIFT  = 7;
+our $EID2_SHIFT  = 25;
+
+our $fmtVerNum = 0;
+
+our $FILTER_INCLUDE = 1;
+our $FILTER_EXCLUDE = 2;
+
+main();
+
+
+sub main
+{
+    my @inFiles = ();
+    my ($type,$outFile,$date,$subdir,$numsub,$summary,$mapFile,$compressed,$size,$decode,$updateTs, $filter, $eventIdStr);
+    my $fmtVer = " 7- 0";
+    my $fileInfoVer = "";
+    my $result = GetOptions("type=s" => \$type,
+			    "date=s" => \$date,
+			    "output=s" => \$outFile,
+			    # main file options
+			    "subdir=s" => \$subdir,
+			    "numsub=n" => \$numsub,
+			    "compressed" => \$compressed,
+			    "fmtver=s"   => \$fmtVer,
+			    "fiv=s" => \$fileInfoVer,
+			    # sub file options
+			    "input=s" => \@inFiles,
+			    "summary" => \$summary,
+			    "map=s" => \$mapFile,
+			    "updatets=s" => \$updateTs,
+			    # target size in KB
+			    "size=s" => \$size, 
+
+			    "decode" => \$decode,
+
+			    "filter=s" => \$filter,
+			    "events=s" => \$eventIdStr,
+
+			    "debug=s" => \$DEBUG
+			    ); 
+    ($result == 1) or die "Invalid args";
+
+    my ($fmtMajor,$fmtMinor) = $fmtVer =~ /^\s*(\d+)-\s(\d+)/;
+    $fmtVerNum = ($fmtMajor * 10) + $fmtMinor;
+    if ( $DEBUG > 5 ) { print "main: fmtVerNum=$fmtVerNum\n"; }
+
+    if ( $mapFile )
+    {
+	loadMap($mapFile);
+    }
+
+    if ( $decode )
+    {
+	foreach my $inFile ( @inFiles )
+	{
+	    decode($inFile);
+	}
+	exit 0;
+    }
+     
+    if ( $filter ) {
+	my $inputFile = shift @inFiles;
+	my @eventIDs = split(",", $eventIdStr);
+	my $filterType;
+	if ( $filter eq "include" ) {
+	    $filterType = $FILTER_INCLUDE;
+	} elsif ( $filter eq "exclude" ) {
+	    $filterType = $FILTER_EXCLUDE;
+	} else {
+	    die "Invalid value for filter $filter";
+	}
+
+	filterEvents($inputFile,$outFile,$filterType, \@eventIDs);
+	exit 0;
+    }
+	
+    if ( $type eq "main" )
+    {
+	open OUT, ">$outFile" or die "Cannot open $outFile";	
+	my ($rop) = $outFile =~ /A([\d\.-]+)/;
+	if ( $DEBUG > 1 ) { print "main: outFile=$outFile rop=$rop\n"; }
+
+	makeMain($date,$rop,$subdir,$numsub,$compressed,$fmtVer,$fileInfoVer);
+	close OUT;		   	
+    }
+    elsif ( $type eq "sub" )
+    {
+	if ( defined $updateTs )
+	{
+	    genDataFast($inFiles[0],$outFile,$date,$updateTs);
+	    if ( $outFile eq '-' )
+	    {
+		open OUT, ">&=STDOUT" or die "Cannot alias STDOUT $!"; 
+	    }
+	    else
+	    {
+		open OUT, ">>$outFile" or die "Cannot open $outFile"; 
+	    }
+	}
+	else
+	{
+	    open OUT, ">$outFile" or die "Cannot open $outFile"; 
+	    genData(\@inFiles,$date,$size,$summary);
+	}
+	writeFooter($date);
+	close OUT;		   	
+    }
+    else
+    {
+	die "Invalid value given for type $type";
+    }
+}
+
+#
+# Creates a file containing a header reader, the required
+# number of link records and a footer record
+#
+sub makeMain
+{
+    my ($date,$namePrefix,$subdir,$numsub,$compressed,$fmtVer,$fileInfoVer) = @_;
+
+
+    writeHeader($date,$fmtVer,$fileInfoVer);
+
+    #
+    # Link Rec per sub file
+    #
+    for ( my $i = 1; $i <= $numsub; $i++ )
+    {
+	my $path = sprintf "%s/p00%02d00/A%s_GPEH.lnk", $subdir, $i, $namePrefix;
+
+	if ( $compressed )
+	{
+	    $path .= ".gz";
+	}
+
+	if ( $DEBUG > 2 ) { print "makeMain: path=$path\n"; }
+
+	my $lnk = pack($LINK_FMT, 
+		       $path);
+	writeRec(8, $lnk);
+    }
+
+    writeFooter($date);
+}
+
+sub genDataFast
+{
+    my ($inFile,$outFile,$date,$updateTs) =@_;
+
+    my ($year,$month,$day,$hour,$min) = $date =~ /^(\d{4,4})(\d{2,2})(\d{2,2})(\d{2,2})(\d{2,2})/;   
+    my $cmd = sprintf("%s -i %s -o %s -h %02d -m %02d -f %d", $updateTs, $inFile, $outFile, $hour, $min,$fmtVerNum);
+    if ( $DEBUG > 3 ) { print "genDataFast: cmd=$cmd\n"; }
+    system($cmd);
+}
+
+sub genData
+{
+    my ($r_inFiles,$date,$size,$summary) = @_;
+      
+
+    #
+    # Read All the Events into r_Events
+    # 
+    my @allEvents = ();
+    for my $inFile ( @{$r_inFiles} )
+    {
+	push @allEvents, readEvents($inFile);
+    }
+    my $r_Events = blendEvents( \@allEvents );
+
+    if ( $#{$r_Events} == -1 ) 
+    {
+	print "ERROR: No events found\n";
+	exit 1;
+    }
+
+    #
+    # If a specific output size is specified then add/remove events to meet the required size
+    # 
+    if ( defined $size )
+    {
+	if ( $size =~ /^(\d+)([mk])/ )
+	{
+	    my ($num,$unit) = ($1,$2);
+	    if ( $unit eq "k" )
+	    {
+		$size = $size * 1024;
+	    }
+	    elsif ( $unit eq "m" )
+	    {
+		$size = $size * 1024 * 1024;
+	    }
+	    else
+	    {
+		die "Invalid unit ($unit) specified for size, valid values are k and m";
+	    }
+	}
+	if ( $DEBUG > 0 ) { print "genData: size=$size\n"; }
+
+	rightSizeEvents($r_Events,($size - $FOOTER_SIZE));
+    }
+
+    #
+    # Write the events
+    # 
+    my %eventStats = ();
+    writeEvents($r_Events,$date,\%eventStats);
+
+    if ( $summary )
+    {
+	printf("%10s %10s %s\n", "Count", "Bytes", "Name");
+	my $totalCount = 0;
+	foreach my $eventId ( sort keys %eventStats )
+	{
+	    printf( "%10d %10d %s\n", $eventStats{$eventId}->{'count'}, $eventStats{$eventId}->{'bytes'}, getEventName($eventId) );
+	    $totalCount += $eventStats{$eventId}->{'count'};
+	}
+	printf("%10d %10s %s\n", $totalCount, "", "Total");
+    }
+}
+    
+sub processEvent
+{
+    my ($eventHeader,$timeBaseHour, $timeBaseMin, $offset, $r_EventStats,$recLength) = @_;
+
+    if ( $DEBUG > 9 ) { 	
+	my $count = 0;
+	foreach my $byte (split (//,$eventHeader)){
+	    printf('%02X ', ord($byte));
+	    $count++;
+	    if ( $count > 8 ) {
+		print "\n";
+		$count = 0;
+	    }
+	}
+	print "\n";
+    }
+
+			    
+    my ($sid1,$sid2,$sid3,$part1,$part2);
+
+    if ( $fmtVerNum < 70 ) {
+	($part1,$part2) = unpack("NN", $eventHeader );
+    } else {
+	($sid1,$sid2,$sid3,$part1,$part2) = unpack("CCCNN", $eventHeader );
+    }
+
+    if ( $DEBUG > 5 ) { printf "processEvent eventHead part1=%08X part2=%08X sid1=%08X sid2=%08X sid3=%08X\n", $part1, $part2, $sid1, $sid2, $sid3; }
+    
+    my $hour = ($part1 & $HOUR_MASK) >> $HOUR_SHIFT;
+    my $min  = ($part1 & $MIN_MASK) >> $MIN_SHIFT;
+    my $sec  = ($part1 & $SEC_MASK) >> $SEC_SHIFT;
+    my $msec = ($part1 & $MSEC_MASK) >> $MSEC_SHIFT;
+    my $eventID = ( (($part1 & $EID1_MASK) << $EID1_SHIFT) | (($part2 & $EID2_MASK) >> $EID2_SHIFT) );
+
+    $r_EventStats->{$eventID}->{'count'}++;
+    $r_EventStats->{$eventID}->{'bytes'}+= $recLength;
+
+    if ( $DEBUG > 5 ) { printf "processEvent eventHead eventID=%03d time=%02d:%02d:%02d.%03d\n", $eventID,$hour,$min,$sec,$msec; }
+    
+    if ( $offset != -1 ) 
+    {
+	$hour = $timeBaseHour;
+	$min = $timeBaseMin + int ($offset / 60000);
+	$sec = int ( ($offset % 60000) / 1000);
+	$msec = $offset % 1000;
+
+	if ( $DEBUG > 5 ) { printf "processEvent adjustTime %0X %02d:%02d:%02d.%03d\n", $part1,$hour,$min,$sec,$msec; }
+    }
+
+    $part1 = ($hour << $HOUR_SHIFT) | ($min << $MIN_SHIFT) | ($sec << $SEC_SHIFT) | ($msec << $MSEC_SHIFT) | ($part1 & $EID1_MASK);
+
+    my $newHeader;
+    if ( $fmtVerNum < 70 ) {
+	$newHeader = pack("NN", $part1, $part2);
+    } else {
+	$newHeader = pack("CCCNN", $sid1, $sid2, $sid3, $part1, $part2);
+    }
+    
+    my $r_HeaderStruct = {
+	'ts'  => sprintf("%02d:%02d:%02d.%03d", $hour, $min, $sec, $msec),
+	'eid' => $eventID,
+	'header' => $newHeader
+	};
+
+    return $r_HeaderStruct;
+}
+
+sub loadMap
+{
+    my ($mapFile) = @_;
+
+    open INPUT, $mapFile or die "Cannot open map file $mapFile";
+    while ( my $line = <INPUT> )
+    {
+	chop $line;
+	my ($eventID,$eventName) = split(/=/, $line);
+	$EVENT_ID_MAP{$eventID} = $eventName;
+    }
+    close INPUT;
+}
+
+sub getEventName
+{
+    my ($eventID) = @_;
+    my $eventName = $EVENT_ID_MAP{$eventID};
+    if ( $eventName )
+    {
+	return $eventName;
+    }
+    else
+    {
+	return $eventID;
+    }
+}
+
+sub rightSizeEvents
+{
+    my ($r_Events,$targetSize) = @_;
+
+    my $numRec = ($#{$r_Events}) + 1;
+    if ( $DEBUG > 3 ) { print "rightSizeEvents: start number of events = $numRec\n"; }
+
+    my $startSize = 0;
+    foreach my $r_Event ( @{$r_Events} )
+    {
+	$startSize += $r_Event->{'recLength'};
+    }
+
+    if ( $DEBUG > 3 ) { print "rightSizeEvents: start size events = $startSize\n"; }
+
+    if ( $startSize > $targetSize )
+    {
+	# Too much srcEvents, so we need to remove some
+	while ( $startSize > $targetSize )
+	{
+	    my $r_Event = pop @{$r_Events};
+	    $startSize -= $r_Event->{'recLength'};
+	}
+    }
+    elsif ( $startSize < $targetSize )
+    {
+	my $index = 0;
+	while ( $startSize < $targetSize )
+	{
+	    my $r_Event = $r_Events->[$index];
+	    $startSize += $r_Event->{'recLength'};
+	    push @{$r_Events}, $r_Event;
+	    
+	    $index = ($index + 1) % $numRec;
+	}
+    }
+
+    if ( $DEBUG > 3 ) { print "rightSizeEvents: end number of events = ", ($#{$r_Events} + 1), " ,end size events = $startSize\n"; }
+}
+
+sub readEvents
+{
+    my ($inFile) = @_;
+    
+    if ( $DEBUG > 0 ) { print "readEvents: inFile=$inFile\n"; }
+
+    my ($recordHeader, $recordData,$eventHeader);
+
+    open INPUT, $inFile or die "Failed to open $inFile";
+
+    my @srcEvents = ();    
+    until ( eof(INPUT) ) 
+    {
+	read(INPUT, $recordHeader, 3);
+	my ($recLength,$recType) = unpack("nC", $recordHeader);
+
+	if ( $DEBUG > 9 ) { print "readEvents: recLength=$recLength recType=$recType ($REC_TYPE_NAMES{$recType})\n"; }
+
+	if ( $recType == $REC_EVENT )
+	{	    
+	    if ( $fmtVerNum < 70 ) {
+		read(INPUT, $eventHeader, 8 );
+		read(INPUT, $recordData, $recLength - 11 );
+	    } else {
+		read(INPUT, $eventHeader, 11 );
+		read(INPUT, $recordData, $recLength - 14 );
+	    }
+
+	    my $r_Event = {
+		"header" => $eventHeader,
+		"data"   => $recordData,
+		"recLength" => $recLength
+		};
+	    push @srcEvents, $r_Event;
+	}
+	else
+	{
+	    read(INPUT, $recordData, $recLength - 3);
+	}
+    }
+    close INPUT;
+
+    return \@srcEvents;
+}
+
+sub filterEvents() {
+    my ($inFile,$outFile,$filterType,$r_eventIDs) = @_;
+
+    my %eventIdMap = ();
+    foreach my $eventId ( @{$r_eventIDs} ) {
+	$eventIdMap{$eventId} = 1;
+    }
+
+    my ($recordHeader, $recordData,$eventHeader);
+
+    open INPUT, $inFile or die "Failed to open $inFile";
+    open OUTPUT, ">$outFile" or die "Failed to open $outFile";
+
+    my %outputCounts = ();
+    my %outputSize = ();
+
+    until ( eof(INPUT) ) 
+    {
+	read(INPUT, $recordHeader, 3);
+	my ($recLength,$recType) = unpack("nC", $recordHeader);
+
+	if ( $DEBUG > 9 ) { print "filterEvents: recLength=$recLength recType=$recType ($REC_TYPE_NAMES{$recType})\n"; }
+
+	if ( $recType == $REC_EVENT ) {	    
+	    if ( $fmtVerNum < 70 ) {
+		read(INPUT, $eventHeader, 8 );
+		read(INPUT, $recordData, $recLength - 11 );
+	    } else {
+		read(INPUT, $eventHeader, 11 );
+		read(INPUT, $recordData, $recLength - 14 );
+	    }
+
+	    my ($sid1,$sid2,$sid3,$part1,$part2);
+	    if ( $fmtVerNum < 70 ) {
+		($part1,$part2) = unpack("NN", $eventHeader );
+	    } else {
+		($sid1,$sid2,$sid3,$part1,$part2) = unpack("CCCNN", $eventHeader );
+	    }
+	    my $eventID = ( (($part1 & $EID1_MASK) << $EID1_SHIFT) | (($part2 & $EID2_MASK) >> $EID2_SHIFT) );
+	    my $eventIdMatched = 0;
+	    if ( exists $eventIdMap{$eventID} ) { 
+		$eventIdMatched = 1;
+	    }
+
+	    my $outputEvent;
+	    if ( ( ($filterType == $FILTER_INCLUDE) && ($eventIdMatched == 1) ) ||
+		 ( ($filterType == $FILTER_EXCLUDE) && ($eventIdMatched == 0) ) ) {
+		$outputEvent = 1;
+	    } else {
+		$outputEvent = 0;
+	    }
+
+	    if ( $DEBUG > 8 ) { print "filterEvents: eventID=$eventID filterType=$filterType eventIdMatched=$eventIdMatched outputEvent=$outputEvent\n"; }
+	    
+	    if ( $outputEvent ) {
+		$outputCounts{$eventID}++;
+		$outputSize{$eventID} += $recLength;
+
+		print OUTPUT $recordHeader;
+		print OUTPUT $eventHeader;
+		print OUTPUT $recordData;
+	    }				
+	}
+	else
+	{
+	    read(INPUT, $recordData, $recLength - 3);
+	}
+    }
+    close INPUT;
+    close OUTPUT;
+
+    printf "EventID Count Bytes\n";
+    foreach my $outputEID ( sort { $a <=> $b } keys %outputCounts ) {
+	printf "%-7d %7d %7d\n", $outputEID, $outputCounts{$outputEID}, $outputSize{$outputEID};
+    }
+}
+
+sub writeEvents
+{
+    my ($r_Events, $date, $r_EventStats) = @_;
+
+    my ($year,$month,$day,$hour,$min);
+    if ( $date )
+    {
+	($year,$month,$day,$hour,$min)
+	    = $date =~ /^(\d{4,4})(\d{2,2})(\d{2,2})(\d{2,2})(\d{2,2})/;
+
+	if ( $DEBUG > 2 ) { print "main: date fields $year,$month,$day,$hour,$min\n"; }
+	($year) or die "Invalid date \"$date\"";
+    }
+
+    #
+    # The timestamp for the events are evenly distributed through out
+    # the rop
+    #
+    my $MSEC_PER_ROP = (15 * 60 * 1000);
+    my $MSEC_PER_EVENT = int ($MSEC_PER_ROP / ($#{$r_Events} + 1));
+    my $offset = 0;
+    
+    if ( $DEBUG > 0 ) { print "writeEvents: MSEC_PER_EVENT = $MSEC_PER_EVENT\n"; }
+   
+    foreach my $r_Event ( @{$r_Events} )
+    {
+	my $r_HeaderStruct = processEvent($r_Event->{'header'},$hour,$min,$offset,$r_EventStats,$r_Event->{'recLength'});
+	if ( $r_HeaderStruct )
+	{
+	    my $common = pack("nC",$r_Event->{'recLength'},$REC_EVENT);
+	    print OUT $common;
+	    print OUT $r_HeaderStruct->{'header'};
+	    print OUT $r_Event->{'data'};
+
+	    $offset += $MSEC_PER_EVENT;
+	}
+    }
+
+}
+
+sub writeHeader
+{
+    my ($date,$fmtVer,$fileInfoVer) = @_;
+
+    my $sec = 0;
+    my ($year,$month,$day,$hour,$min) = $date =~ /^(\d{4,4})(\d{2,2})(\d{2,2})(\d{2,2})(\d{2,2})/;
+    if ( $DEBUG > 2 ) { print "main: date fields $year,$month,$day,$hour,$min,$sec\n"; }
+    ($year) or die "Invalid date \"$date\"";
+
+    my ($major,$minor) = $fmtVer =~ /(\d+)-\s*(\d+)/;
+    my $fmtVerNum = ($major * 10) + $minor;
+    my $header;
+    if ( $fmtVerNum < 71 ) {	
+	$header = pack($HEADER_FMT, 
+		       $fmtVer,
+		       $year, $month, $day, $hour, $min, $sec,
+		       "", "");
+    } else {
+	$header = pack($HEADER_FMT_71, 
+		       $fmtVer,
+		       $year, $month, $day, $hour, $min, $sec,
+		       "", "", $fileInfoVer);
+    }
+
+    writeRec(0,$header);
+}
+
+sub writeFooter
+{
+    my ($date) = @_;
+
+    my ($year,$month,$day,$hour,$min,$sec);
+    if ( $date )
+    {
+	($year,$month,$day,$hour,$min) = $date =~ /^(\d{4,4})(\d{2,2})(\d{2,2})(\d{2,2})(\d{2,2})/;
+	if ( $DEBUG > 2 ) { print "main: date fields $year,$month,$day,$hour,$min,$sec\n"; }
+	($year) or die "Invalid date \"$date\"";
+    }
+
+    my $footer = pack($FOOTER_FMT, $year, $month, $day, $hour, $min, $sec );
+    writeRec( 7, $footer );
+}
+
+sub writeRec
+{
+    my ($recType, $recData) = @_;
+
+    my $size = length($recData) + 3;
+    if ( $DEBUG > 4 ) { printf "writeRec: size=$size secHex=%0X recType=$recType\n", $size; }
+    
+    my $common = pack("nC",$size,$recType);
+    print OUT $common;
+    print OUT $recData;
+}
+
+sub decode
+{
+    my ($inFile) = @_;
+
+    my ($recordHeader, $recordData,$eventHeader);
+    
+    open INPUT, $inFile or die "Failed to open $inFile";
+    my %eventStats = ();
+
+    my $bytesRead = 0;
+    my $recRead = 0;
+
+    until ( eof(INPUT) ) 
+    {
+	$bytesRead += read(INPUT, $recordHeader, 3); 
+	my ($recLength,$recType) = unpack("nC", $recordHeader);
+	$bytesRead += read(INPUT, $recordData, $recLength - 3);
+	$recRead++;
+
+	if ( $DEBUG > 9 ) { print "decode: bytesRead=$bytesRead recRead=$recRead recLength=$recLength recType=$recType ($REC_TYPE_NAMES{$recType})\n"; }
+
+	if ( $recType == $REC_HEADER )
+	{
+	    my ($fmtVer,$year, $month, $day, $hour, $min, $sec,$userLabel,$logicalName) = unpack($HEADER_FMT,$recordData);
+	    printf "HEADER: fmtVer=\"%s\" ts=%04d-%02d-%02d:%02d:%02d:%02d userLabel==\"%s\" logicalName=\"%s\"\n", $fmtVer, $year,$month,$day,$hour,$min,$sec, $userLabel, $logicalName;
+	}
+	elsif ( $recType == $REC_LNK )
+	{
+	    my ( $subFile ) = unpack($LINK_FMT,$recordData);
+	    printf "LINK: path=\"%s\"\n", $subFile;
+	}
+	elsif ( $recType == $REC_EVENT )
+	{
+	    my $r_HeaderStruct = processEvent($recordData,0,0,-1,\%eventStats,$recLength);
+	    printf "EVENT: ts=%s id=%s \n", $r_HeaderStruct->{'ts'}, getEventName($r_HeaderStruct->{'eid'});
+	}	    
+
+    }
+    close INPUT;
+}
+
+sub blendEvents
+{
+    my ($r_AllEvents) = @_;
+
+    my @events = ();
+
+    foreach my $r_oneEventList ( @{$r_AllEvents} )
+    {
+	foreach my $r_Event ( @{$r_oneEventList} )
+	{
+	    push @events, $r_Event;
+	}
+    }
+
+    return \@events;
+}

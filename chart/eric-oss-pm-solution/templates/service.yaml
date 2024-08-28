@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "eric-oss-pm-solution.fullname" . }}
+  labels:
+    {{- include "eric-oss-pm-solution.labels" . | nindent 4 }}
+spec:
+#  externalTrafficPolicy: Cluster
+  type: ClusterIP 
+  ports:
+    - port: 2020 
+      #nodePort: 32044
+      targetPort: 22
+      protocol: TCP
+      name: sftp
+    - port: 4545
+      targetPort: 4545
+      protocol: TCP
+      name: ondemand 
+  selector:
+    {{- include "eric-oss-pm-solution.selectorLabels" . | nindent 4 }}
+

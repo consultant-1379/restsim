@@ -1,0 +1,291 @@
+#!/bin/bash
+
+################################################################################
+# COPYRIGHT Ericsson 2017
+#
+# The copyright to the computer program(s) herein is the property of
+# Ericsson Inc. The programs may be used and/or copied only with written
+# permission from Ericsson Inc. or in accordance with the terms and
+# conditions stipulated in the agreement/contract under which the
+# program(s) have been supplied.
+################################################################################
+
+###################################################
+# Version no    :  NSS 17.14
+# Purpose       :  Script to generate subtemplates based on configuration provided in netsim_cfg
+# Jira No       :  NSS-14486
+# Gerrit Link   :
+# Description   :  Made changes to ignore mp files of GPEH which have id greater than 1 to reduce filesystem cache.
+# Date          :  30/08/2017
+# Last Modified :  abhishek.mandlewala@tcs.com
+####################################################
+
+ROOT_DIR=`dirname $0`
+. ${ROOT_DIR}/functions
+
+function unpackTemplateParts {
+    for TYPE in ebsw wncs wgeo ; do
+        if [ ! -d ${IN_DIR}/${TYPE} ] ; then
+            mkdir ${IN_DIR}/${TYPE}
+    fi
+
+        cd ${IN_DIR}/${TYPE}
+        for RNC in  ${LIST} ; do
+            if [ ! -r ${IN_DIR}/${RNC}.${TYPE}_templates.tar.gz ] ; then
+                echo "ERROR: ${IN_DIR}/${RNC}.${TYPE}_templates.tar.gz not found"
+                exit 1
+            else
+                gzip -dc ${IN_DIR}/${RNC}.${TYPE}_templates.tar.gz | tar xf - > /dev/null 2>&1
+            fi
+        done
+    done
+
+    if [ ! -d ${IN_DIR}/other ] ; then
+        mkdir ${IN_DIR}/other
+        cd ${IN_DIR}/other
+        gzip -dc ${IN_DIR}/Other_templates.tar.gz | tar xf - > /dev/null 2>&1
+    fi
+}
+
+function unpackSingleTemplate {
+#only ebsm tempalte is present
+    for TYPE in ebsw ; do
+        if [ ! -d ${IN_DIR}/${TYPE} ] ; then
+            mkdir ${IN_DIR}/${TYPE}
+        fi
+
+        cd ${IN_DIR}/${TYPE}
+
+        if [ ! -r ${IN_DIR}/"RNC".${TYPE}_templates.tar.gz ] ; then
+            echo "ERROR: ${IN_DIR}/${RNC}.${TYPE}_templates.tar.gz not found"
+            exit 1
+        else
+            gzip -dc ${IN_DIR}/"RNC".${TYPE}_templates.tar.gz | tar xf - > /dev/null 2>&1
+        fi
+    done
+
+}
+
+function calOtherSize {
+    MY_RNC=$1
+
+    MY_MP_CONFIG=`getMPConfig ${MY_RNC}`
+    if [ $? -ne 0 ] ; then
+    echo "ERROR: Could not get MP configuration for ${MY_RNC}"
+    exit 1
+    fi
+    MY_MP_PER_FILE=`echo ${MY_MP_CONFIG} | awk -F, '{print $2}'`
+
+    MY_SIZE=$(expr ${TOTAL_SIZE} \* ${MY_MP_PER_FILE})
+
+    OPTIMIZER_TOTAL=0
+    # EBSW
+    MY_EBSW_SIZE=`expr ${EBSW_SIZE} \* ${MY_MP_PER_FILE}`
+    OPTIMIZER_TOTAL=$(expr ${OPTIMIZER_TOTAL} + ${MY_EBSW_SIZE})
+    # WNCS
+    NCS_SIZE=`ls -l ${IN_DIR}/wncs/${MY_RNC}_mp1_gpeh_sub.bin | awk '{print $5}'`
+    OPTIMIZER_TOTAL=$(expr ${OPTIMIZER_TOTAL} + ${NCS_SIZE})
+    # GEOW
+    GEOW_SIZE=`ls -l ${IN_DIR}/wgeo/${MY_RNC}_mp1_gpeh_sub.bin | awk '{print $5}'`
+    OPTIMIZER_TOTAL=$(expr ${OPTIMIZER_TOTAL} + ${GEOW_SIZE})
+
+    if [ ${MY_SIZE} -gt ${OPTIMIZER_TOTAL} ] ; then
+    OTHER_SIZE=$(expr ${MY_SIZE} - ${OPTIMIZER_TOTAL})
+    else
+    OTHER_SIZE=0
+    fi
+
+    echo ${OTHER_SIZE}
+}
+
+function upscaleOther {
+    MY_RNC=$1
+   
+    MIM_VER=`${ROOT_DIR}/get_mim_ver --sim ${MY_RNC} --netype RNC`
+    if [ $? -ne 0 ] ; then
+        echo "ERROR: Cannot determine MIM version for ${MY_RNC}"
+        exit 1
+    fi
+
+    # If the size of the EBSW,NCS & GEOW parts are >= the total size
+    # we don't need an other part
+    MY_OTHER_SIZE=$(calOtherSize ${MY_RNC})
+    if [ ${MY_OTHER_SIZE} -gt 0 ] ; then
+    MY_OTHER_SIZE_MB=`expr ${MY_OTHER_SIZE} / 1048576`
+    MY_OTHER_FILE=${TMP_DIR}/Other_${MIM_VER}_gpeh_sub_${MY_OTHER_SIZE_MB}.bin
+    if [ ! -r ${MY_OTHER_FILE} ] ; then
+        MIM_UNDERSCORE=`echo ${MIM_VER} | sed 's/\./_/g'`
+            if [ ! -r ${IN_DIR}/other/${MIM_UNDERSCORE}_gpeh_sub.bin ] ; then
+        log "ERROR: Could not find Other template for mim version ${MIM_VER}, required for ${RNC}"
+        exit 1
+            fi
+
+            log "Upscaling other content for ${MIM_VER} to ${MY_OTHER_SIZE}"
+            CMD="${UPDATE_TS} -i ${IN_DIR}/other/${MIM_UNDERSCORE}_gpeh_sub.bin -o ${MY_OTHER_FILE} -z ${MY_OTHER_SIZE}"
+            if [ ! -z "${RANDOM_BYTES}" ] ; then
+        CMD="${CMD} -r ${RANDOM_BYTES}"
+            fi
+            ${CMD}
+            if [ $? -ne 0 ] ; then
+        echo "ERROR: upscaling for Other data failed, ${CMD}"
+        exit 1
+            fi
+    fi
+
+    OTHER_FILE=${MY_OTHER_FILE}
+    else
+    OTHER_FILE=""
+    fi
+}
+
+function upscaleEbsw {
+    MY_RNC=$1
+
+    if [ ! -d ${TMP_DIR}/ebsw ] ; then
+    mkdir ${TMP_DIR}/ebsw
+    fi
+
+    MY_MP_CONFIG=`getMPConfig ${MY_RNC}`
+    if [ $? -ne 0 ] ; then
+    echo "ERROR: Could not get MP configuration for ${MY_RNC}"
+    exit 1
+    fi
+    MY_MP_PER_FILE=`echo ${MY_MP_CONFIG} | awk -F, '{print $2}'`
+    MY_EBSW_SIZE=`expr ${EBSW_SIZE} \* ${MY_MP_PER_FILE}`
+
+    if [ ${ENV_TYPE} -eq 0 ] ; then
+        IN_FILE_LIST=`find ${IN_DIR}/ebsw -name "${MY_RNC}*"`
+    else
+        IN_FILE_LIST=`find ${IN_DIR}/ebsw -name "RNC*"`
+    fi
+
+    if [ -z "${IN_FILE_LIST}" ] ; then
+    log " ERROR: No ebsw files found for ${MY_RNC}"
+    exit 1
+    fi
+    for IN_FILE in ${IN_FILE_LIST} ; do
+    OUT_FILE=`basename ${IN_FILE}`
+
+    if [ ${ENV_TYPE} -eq 1 ] ; then
+        OUT_FILE="${OUT_FILE/RNC/${MY_RNC}}"
+        if [[ "${OUT_FILE}" != *"_mp1."* ]]; then
+            continue
+        fi
+    fi
+
+    log " ${OUT_FILE}"
+        CMD="${UPDATE_TS} -i ${IN_FILE} -o ${TMP_DIR}/ebsw/${OUT_FILE} -z ${EBSW_SIZE}"
+        ${CMD}
+        if [ $? -ne 0 ] ; then
+            echo "ERROR: upscaling for EBS data failed, ${CMD}"
+            exit 1
+        fi
+    done
+}
+
+function mergeParts {
+    for RNC in ${LIST} ; do
+    if [ ${SKIP_IF_EXISTS} -eq 1 ] && [ -r ${OUT_DIR}/${RNC}_mp$1_gpeh_sub.bin ] ; then
+        log "INFO: File already exists for ${RNC}"
+        continue
+    fi
+
+        log "Merging files for ${RNC}"
+
+    log "Upscaling EBS"
+    upscaleEbsw ${RNC}
+
+    upscaleOther ${RNC}
+        MY_OTHER_FILE=${OTHER_FILE}
+    if [ -z "${MY_OTHER_FILE}" ] ; then
+        log "Other not required"
+    fi
+
+        EBSW_MP_FILES=`ls ${TMP_DIR}/ebsw/${RNC}*`
+
+        for EBSW_MP_FILE in ${EBSW_MP_FILES} ; do
+            MP=`echo ${EBSW_MP_FILE} | sed 's/.*mp\([0-9]*\)\..*/\1/'`
+
+            cat ${EBSW_MP_FILE} > ${OUT_DIR}/${RNC}_mp${MP}_gpeh_sub.bin
+            cat ${IN_DIR}/wncs/${RNC}_mp${MP}_gpeh_sub.bin >> ${OUT_DIR}/${RNC}_mp${MP}_gpeh_sub.bin
+            cat ${IN_DIR}/wgeo/${RNC}_mp${MP}_gpeh_sub.bin >> ${OUT_DIR}/${RNC}_mp${MP}_gpeh_sub.bin
+        if [ ! -z "${MY_OTHER_FILE}" ] ; then
+        cat ${MY_OTHER_FILE} >> ${OUT_DIR}/${RNC}_mp${MP}_gpeh_sub.bin
+        fi
+        done
+    done
+}
+
+function mergeSingleTemplate {
+    for RNC in ${LIST} ; do
+    if [ ${SKIP_IF_EXISTS} -eq 1 ] && [ -r ${OUT_DIR}/${RNC}_mp$1_gpeh_sub.bin ] ; then
+        log "INFO: File already exists for ${RNC}"
+        continue
+    fi
+    log "Merging files for ${RNC}"
+
+    log "Upscaling EBS"
+    upscaleEbsw ${RNC}
+    MY_OTHER_FILE=${OTHER_FILE}
+    if [ -z "${MY_OTHER_FILE}" ] ; then
+        log "Other not required"
+    fi
+
+    EBSW_MP_FILES=`ls ${TMP_DIR}/ebsw/${RNC}*`
+
+        for EBSW_MP_FILE in ${EBSW_MP_FILES} ; do
+            MP=`echo ${EBSW_MP_FILE} | sed 's/.*mp\([0-9]*\)\..*/\1/'`
+            cat ${EBSW_MP_FILE} > ${OUT_DIR}/${RNC}_mp${MP}_gpeh_sub.bin
+            if [ ! -z "${MY_OTHER_FILE}" ] ; then
+                cat ${MY_OTHER_FILE} >> ${OUT_DIR}/${RNC}_mp${MP}_gpeh_sub.bin
+            fi
+        done
+        gzip -c  ${OUT_DIR}/${RNC}_mp1_gpeh_sub.bin > ${OUT_DIR}/${RNC}_mp1_gpeh_sub.lnk.gz
+        if [ $? -ne 0 ] ; then
+            echo "ERROR: gzip failed "
+            exit 1
+        fi
+    done
+}
+
+if [ -r /netsim/netsim_cfg ] ; then
+. /netsim/netsim_cfg > /dev/null 2>&1
+fi
+
+RANDOM_BYTES=""
+SKIP_IF_EXISTS=0
+ENV_TYPE=0
+
+while getopts  "i:o:t:e:r:m:v:s" flag
+do
+    case "$flag" in
+        i) IN_DIR="$OPTARG";;
+        o) OUT_DIR="$OPTARG";;
+        e) EBSW_SIZE="${OPTARG}";;
+        t) TOTAL_SIZE="${OPTARG}";;
+        r) LIST="${OPTARG}";;
+        m) RANDOM_BYTES="${OPTARG}";;
+    s) SKIP_IF_EXISTS=1;;
+    v) ENV_TYPE="${OPTARG}";;
+
+        *) printf "Usage: %s -i Src Template dir -o Dest Template dir -e EBSW size -t total size [ -m randombytes ]\n" $0
+           exit 1;;
+    esac
+done
+
+PROC_TYPE=`uname -p`
+UPDATE_TS=`printf "%s/updatets.%s" ${ROOT_DIR} ${PROC_TYPE}`
+
+
+TMP_DIR=/tmp/merge
+if [ ! -d ${TMP_DIR} ] ; then
+    mkdir ${TMP_DIR}
+fi
+if [ ${ENV_TYPE} -eq 0 ] ; then
+
+    unpackTemplateParts
+    mergeParts
+else
+    unpackSingleTemplate
+    mergeSingleTemplate
+fi
